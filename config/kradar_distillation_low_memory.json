@@ -1,0 +1,207 @@
+{
+    "dataset": "kradar",
+    "_comment": "低显存蒸馏配置 - 针对显存不足优化，支持学生模型queries少于教师模型",
+
+    "computing": {
+        "dtype": "float16",
+        "_comment_dtype": "使用混合精度训练，显存减少约50%",
+        "seed": 42,
+        "workers": 8,
+        "_comment_workers": "减少worker数量，从16降到8",
+        "device": "cuda"
+    },
+
+    "data": {
+        "revision": "v2",
+        "image_size": 384,
+        "_comment_image_size": "从512降到384，显存减少约30-40%",
+        "num_classes": 2,
+        "categories": {
+            "Sedan": 0,
+            "Bus or Truck": -1,
+            "Motorcycle": -1,
+            "Bicycle": -1,
+            "Bicycle Group": -1,
+            "Pedestrian": -1,
+            "Pedestrian Group": -1,
+            "Background": -1
+        },
+        "fov": {
+            "x": [0.0, 72.0],
+            "y": [-6.4, 6.4],
+            "z": [-2.0, 6.0],
+            "azimuth": [-50, 50]
+        }
+    },
+
+    "train": {
+        "batch_size": 2,
+        "_comment_batch_size": "从4降到2，如果还是OOM可以降到1",
+        "shuffle": true,
+        "epochs": 150,
+        "_comment_epochs": "蒸馏训练通常收敛更快",
+        "logging": "epoch",
+
+        "distillation": {
+            "teacher_checkpoint": "path/to/your/teacher_model.pt",
+            "_comment_checkpoint": "教师模型有400个queries，学生模型只有100个",
+            "freeze_teacher": true,
+            "temperature": 4.0,
+            "alpha": 0.5,
+            "distill_mode": "matched",
+            "_comment_distill_mode": "matched模式：学生模型的100个queries会与GT匹配，然后从教师模型选择对应的queries进行蒸馏"
+        },
+
+        "optimizer": {
+            "name": "AdamW",
+            "lr": 0.00015,
+            "_comment_lr": "蒸馏时略微提高学习率"
+        },
+        "anassigner": "HungarianAnassigner",
+        "criterion": "SetCriterion",
+        "losses": {
+            "class": "FocalLoss",
+            "center": "L1Loss",
+            "size": "L1Loss",
+            "angle": "L1Loss"
+        },
+        "loss_inputs": {
+            "class": ["class"],
+            "center": ["center"],
+            "size": ["size"],
+            "angle": ["angle"]
+        },
+        "loss_weights": {
+            "total_class": 1.0,
+            "object_class": 0.0,
+            "center": 1.0,
+            "size": 1.0,
+            "angle": 1.0
+        },
+        "scheduler": {
+            "name": "ConstantLR",
+            "factor": 1.0
+        }
+    },
+
+    "model": {
+        "name": "dprt",
+        "_comment_model": "学生模型 - 针对显存优化，n_queries=100（教师是400）",
+        "inputs": [
+            "camera_mono",
+            "radar_bev",
+            "radar_front"
+        ],
+        "skiplinks": {
+            "camera_mono": true,
+            "radar_bev": true,
+            "radar_front": true
+        },
+        "backbones": {
+            "camera_mono": {
+                "name": "ResNet101",
+                "_comment": "保持ResNet101以获得更好特征",
+                "weights": "IMAGENET1K_V2",
+                "multi_scale": 4,
+                "norm_layer": "BatchNorm2d"
+            },
+            "radar_bev": {
+                "name": "ResNet50",
+                "_comment": "保持ResNet50",
+                "weights": "IMAGENET1K_V2",
+                "in_channels": 6,
+                "multi_scale": 4,
+                "norm_layer": "BatchNorm2d"
+            },
+            "radar_front": {
+                "name": "ResNet50",
+                "_comment": "保持ResNet50",
+                "weights": "IMAGENET1K_V2",
+                "in_channels": 6,
+                "multi_scale": 4,
+                "norm_layer": "BatchNorm2d"
+            }
+        },
+        "necks": {
+            "camera_mono": {
+                "name": "FPN",
+                "in_channels_list": [3, 256, 512, 1024, 2048],
+                "out_channels": 16
+            },
+            "radar_bev": {
+                "name": "FPN",
+                "in_channels_list": [6, 256, 512, 1024, 2048],
+                "out_channels": 16
+            },
+            "radar_front": {
+                "name": "FPN",
+                "in_channels_list": [6, 256, 512, 1024, 2048],
+                "out_channels": 16
+            }
+        },
+        "embeddings": {
+            "camera_mono": {
+                "name": "sinusoidal_embedding",
+                "num_feats": 16,
+                "n_levels": 5,
+                "normalize": true
+            },
+            "radar_bev": {
+                "name": "sinusoidal_embedding",
+                "num_feats": 16,
+                "n_levels": 5,
+                "normalize": true
+            },
+            "radar_front": {
+                "name": "sinusoidal_embedding",
+                "num_feats": 16,
+                "n_levels": 5,
+                "normalize": true
+            }
+        },
+        "querent": {
+            "name": "data_agnostic_static_querent",
+            "transformation": "spher2cart",
+            "resolution": [10, 10, 1],
+            "_comment_resolution": "从[20,20,1]降到[10,10,1]，生成100个queries（教师是400）",
+            "_comment_calculation": "10 * 10 * 1 = 100 queries",
+            "minimum": [4, -50, 0],
+            "maximum": [72, 50, 0]
+        },
+        "fuser": {
+            "name": "IMPFusion",
+            "i_iter": 3,
+            "_comment_i_iter": "从4降到3，节省约25%计算量",
+            "m_views": 3,
+            "d_model": 16,
+            "d_ffn": 32,
+            "n_queries": 100,
+            "_comment_n_queries": "从400降到100，显存大幅减少约75%",
+            "n_levels": [5, 5, 5],
+            "n_heads": [8, 8, 8],
+            "n_points": [4, 4, 4],
+            "norm": true,
+            "dropout": 0.1,
+            "reduction": "linear",
+            "activation": "Mish"
+        },
+        "head": {
+            "name": "linear_detection_head",
+            "in_channels": 16,
+            "num_classes": 2,
+            "num_reg_layers": 3,
+            "num_cls_layers": 3
+        }
+    },
+
+    "evaluate": {
+        "logging": "epoch",
+        "metrics": {
+            "mAP": "mAP3D",
+            "mGIoU": "mGIoU3D"
+        },
+        "exporter": {
+            "name": "kradar"
+        }
+    }
+}

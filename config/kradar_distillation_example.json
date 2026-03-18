@@ -1,0 +1,206 @@
+{
+    "dataset": "kradar",
+    "_comment": "重度压缩蒸馏配置 - 最大程度压缩模型（谨慎使用）",
+
+    "computing": {
+        "dtype": "float32",
+        "seed": 42,
+        "workers": 16,
+        "device": "cuda"
+    },
+
+    "data": {
+        "revision": "v2",
+        "image_size": 512,
+        "num_classes": 2,
+        "categories": {
+            "Sedan": 0,
+            "Bus or Truck": -1,
+            "Motorcycle": -1,
+            "Bicycle": -1,
+            "Bicycle Group": -1,
+            "Pedestrian": -1,
+            "Pedestrian Group": -1,
+            "Background": -1
+        },
+        "fov": {
+            "x": [0.0, 72.0],
+            "y": [-6.4, 6.4],
+            "z": [-2.0, 6.0],
+            "azimuth": [-50, 50]
+        }
+    },
+
+    "train": {
+        "batch_size": 4,
+        "shuffle": true,
+        "epochs": 200,
+        "_comment_epochs": "重度压缩需要更长训练时间",
+        "logging": "epoch",
+
+        "distillation": {
+            "teacher_checkpoint": "path/to/your/teacher_model.pt",
+            "freeze_teacher": true,
+            "temperature": 6.0,
+            "_comment_temperature": "更高温度(6.0)以弥补架构差异",
+            "alpha": 0.7,
+            "_comment_alpha": "更高蒸馏权重(0.7)让学生更多学习教师",
+            "distill_mode": "matched",
+            "_comment_distill_mode": "'matched'=只蒸馏匹配框(推荐), 'all'=蒸馏所有框"
+        },
+
+        "optimizer": {
+            "name": "AdamW",
+            "lr": 0.0002,
+            "_comment_lr": "略微提高学习率以加速收敛"
+        },
+        "anassigner": "HungarianAnassigner",
+        "criterion": "SetCriterion",
+        "losses": {
+            "class": "FocalLoss",
+            "center": "L1Loss",
+            "size": "L1Loss",
+            "angle": "L1Loss"
+        },
+        "loss_inputs": {
+            "class": ["class"],
+            "center": ["center"],
+            "size": ["size"],
+            "angle": ["angle"]
+        },
+        "loss_weights": {
+            "total_class": 1.0,
+            "object_class": 0.0,
+            "center": 1.0,
+            "size": 1.0,
+            "angle": 1.0
+        },
+        "scheduler": {
+            "name": "ConstantLR",
+            "factor": 1.0
+        }
+    },
+
+    "model": {
+        "name": "dprt",
+        "_comment_model": "学生模型 - 重度压缩（参数减少约50%）",
+        "inputs": [
+            "camera_mono",
+            "radar_bev",
+            "radar_front"
+        ],
+        "skiplinks": {
+            "camera_mono": true,
+            "radar_bev": true,
+            "radar_front": true
+        },
+        "backbones": {
+            "camera_mono": {
+                "name": "ResNet50",
+                "_comment": "教师用ResNet101，学生降到ResNet50 - 参数减少约55%",
+                "weights": "IMAGENET1K_V2",
+                "multi_scale": 4,
+                "norm_layer": "BatchNorm2d"
+            },
+            "radar_bev": {
+                "name": "ResNet34",
+                "_comment": "教师用ResNet50，学生降到ResNet34 - 参数减少约45%",
+                "weights": "IMAGENET1K_V1",
+                "in_channels": 6,
+                "multi_scale": 4,
+                "norm_layer": "BatchNorm2d"
+            },
+            "radar_front": {
+                "name": "ResNet34",
+                "_comment": "教师用ResNet50，学生降到ResNet34 - 参数减少约45%",
+                "weights": "IMAGENET1K_V1",
+                "in_channels": 6,
+                "multi_scale": 4,
+                "norm_layer": "BatchNorm2d"
+            }
+        },
+        "necks": {
+            "camera_mono": {
+                "name": "FPN",
+                "in_channels_list": [3, 256, 512, 1024, 2048],
+                "_comment": "ResNet50的输出通道",
+                "out_channels": 16
+            },
+            "radar_bev": {
+                "name": "FPN",
+                "in_channels_list": [6, 64, 128, 256, 512],
+                "_comment": "ResNet34的输出通道 - 注意与教师不同",
+                "out_channels": 16
+            },
+            "radar_front": {
+                "name": "FPN",
+                "in_channels_list": [6, 64, 128, 256, 512],
+                "_comment": "ResNet34的输出通道 - 注意与教师不同",
+                "out_channels": 16
+            }
+        },
+        "embeddings": {
+            "camera_mono": {
+                "name": "sinusoidal_embedding",
+                "num_feats": 16,
+                "n_levels": 5,
+                "normalize": true
+            },
+            "radar_bev": {
+                "name": "sinusoidal_embedding",
+                "num_feats": 16,
+                "n_levels": 5,
+                "normalize": true
+            },
+            "radar_front": {
+                "name": "sinusoidal_embedding",
+                "num_feats": 16,
+                "n_levels": 5,
+                "normalize": true
+            }
+        },
+        "querent": {
+            "name": "data_agnostic_static_querent",
+            "transformation": "spher2cart",
+            "resolution": [16, 16, 1],
+            "_comment_resolution": "从20x20降到16x16，queries从400降到256（-36%）",
+            "minimum": [4, -50, 0],
+            "maximum": [72, 50, 0]
+        },
+        "fuser": {
+            "name": "IMPFusion",
+            "i_iter": 3,
+            "_comment_i_iter": "从4降到3",
+            "m_views": 3,
+            "d_model": 16,
+            "d_ffn": 32,
+            "n_queries": 256,
+            "_comment_n_queries": "16x16x1=256，必须与resolution匹配",
+            "n_levels": [5, 5, 5],
+            "n_heads": [8, 8, 8],
+            "n_points": [4, 4, 4],
+            "norm": true,
+            "dropout": 0.1,
+            "reduction": "linear",
+            "activation": "Mish"
+        },
+        "head": {
+            "name": "linear_detection_head",
+            "in_channels": 16,
+            "num_classes": 2,
+            "num_reg_layers": 3,
+            "num_cls_layers": 3
+        }
+    },
+
+    "evaluate": {
+        "logging": "epoch",
+        "metrics": {
+            "mAP": "mAP3D",
+            "mGIoU": "mGIoU3D"
+        },
+        "exporter": {
+            "name": "kradar"
+        }
+    }
+}

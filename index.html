@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>农民信用贷款系统 - 助力农业发展</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>tailwind.config = { theme: { extend: { colors: { primary: '#059669', secondary: '#6B7280' }, borderRadius: { 'none': '0px', 'sm': '2px', DEFAULT: '4px', 'md': '8px', 'lg': '12px', 'xl': '16px', '2xl': '20px', '3xl': '24px', 'full': '9999px', 'button': '4px' } } } }</script>
+    <style>
+        body {
+            min-height: 1024px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        .carousel-item {
+            transition: transform 0.5s ease-in-out;
+        }
+
+        .faq-item {
+            transition: all 0.3s ease;
+        }
+
+        .product-card {
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .product-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+
+        .calculator-input {
+            border: 1px solid #E5E7EB;
+        }
+
+        .calculator-input:focus {
+            border-color: #059669;
+            outline: none;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-50">
+    <!-- 顶部导航栏 -->
+    <nav class="bg-white shadow-sm border-b border-gray-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center space-x-8">
+                    <div class="text-2xl font-['Pacifico'] text-green-600">logo</div>
+                    <div class="hidden md:flex space-x-6">
+                        <a href="#" class="text-gray-700 hover:text-green-600 font-medium transition-colors">首页</a>
+                        <a href="#" class="text-gray-700 hover:text-green-600 font-medium transition-colors">贷款产品</a>
+                        <a href="#" class="text-gray-700 hover:text-green-600 font-medium transition-colors">政策资讯</a>
+                        <a href="#" class="text-gray-700 hover:text-green-600 font-medium transition-colors">申请流程</a>
+                        <a href="#" class="text-gray-700 hover:text-green-600 font-medium transition-colors">帮助中心</a>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button
+                        class="bg-green-600 text-white px-4 py-2 !rounded-button whitespace-nowrap hover:bg-green-700 transition-colors">登录</button>
+                    <button
+                        class="border border-green-600 text-green-600 px-4 py-2 !rounded-button whitespace-nowrap hover:bg-green-50 transition-colors">注册</button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 轮播图横幅 -->
+    <section class="relative h-96 bg-gradient-to-r from-green-600 to-emerald-700 overflow-hidden">
+        <div class="absolute inset-0 bg-cover bg-center opacity-20"
+            style="background-image: url('https://ai-public.mastergo.com/gen_page/map_placeholder_1280x720.png');">
+        </div>
+        <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-full flex items-center">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+                <div class="text-white">
+                    <h1 class="text-4xl font-bold mb-4">助力农业发展<br>服务农民朋友</h1>
+                    <p class="text-lg mb-6 opacity-90">专业农民信用贷款服务，低利率、快审批、便民利农</p>
+                    <div class="flex space-x-4">
+                        <button
+                            class="bg-green-600 text-white px-6 py-3 !rounded-button whitespace-nowrap hover:bg-green-700 transition-colors">立即申请</button>
+                        <button
+                            class="border border-green-600 text-green-600 px-6 py-3 !rounded-button whitespace-nowrap hover:bg-green-50 transition-colors">了解更多</button>
+                    </div>
+                </div>
+                <div class="hidden lg:block">
+                    <div class="bg-white bg-opacity-20 backdrop-blur-sm rounded-lg p-6">
+                        <h3 class="text-white text-xl font-semibold mb-4">最新资讯</h3>
+                        <div class="space-y-3">
+                            <div class="text-white opacity-90">
+                                <p class="font-medium">农业贷款新政策发布</p>
+                                <p class="text-sm">2024-01-15</p>
+                            </div>
+                            <div class="text-white opacity-90">
+                                <p class="font-medium">春耕贷款专项服务</p>
+                                <p class="text-sm">2024-01-14</p>
+                            </div>
+                            <div class="text-white opacity-90">
+                                <p class="font-medium">农村金融扶持计划</p>
+                                <p class="text-sm">2024-01-13</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+
+    <!-- 产品推荐区域 -->
+    <section class="py-16 bg-gradient-to-b from-green-50 to-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-12">
+                <h2 class="text-3xl font-bold text-green-800 mb-4">精选贷款产品</h2>
+                <p class="text-green-600">专为农民朋友设计，利率优惠，审批快速</p>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <!-- 产品1 -->
+                <div class="product-card bg-white rounded-xl shadow-lg border border-green-100 p-6 hover:shadow-xl transition-all duration-300 hover:border-green-300 hover:-translate-y-1">
+                    <div class="w-16 h-16 bg-gradient-to-r from-green-400 to-green-500 rounded-full flex items-center justify-center mb-4 mx-auto text-white">
+                        <i class="fas fa-seedling text-2xl"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-center mb-2 text-green-800">春耕贷</h3>
+                    <p class="text-gray-600 text-center mb-4">专为春耕备耕设计的专项贷款</p>
+                    <div class="space-y-3 mb-4">
+                        <div class="flex justify-between items-center py-2 border-b border-green-50">
+                            <span class="text-gray-600">年利率</span>
+                            <span class="font-bold text-green-600">4.85%</span>
+                        </div>
+                        <div class="flex justify-between items-center py-2 border-b border-green-50">
+                            <span class="text-gray-600">最高额度</span>
+                            <span class="font-bold text-green-600">¥50万</span>
+                        </div>
+                        <div class="flex justify-between items-center py-2 border-b border-green-50">
+                            <span class="text-gray-600">期限</span>
+                            <span class="font-bold text-green-600">1-3年</span>
+                        </div>
+                    </div>
+                    <button
+                        class="w-full bg-gradient-to-r from-green-500 to-green-600 text-white py-3 !rounded-button whitespace-nowrap hover:from-green-600 hover:to-green-700 transition-all duration-300 shadow-md hover:shadow-lg">立即申请</button>
+                </div>
+
+                <!-- 产品2 -->
+                <div class="product-card bg-white rounded-xl shadow-lg border border-green-100 p-6 hover:shadow-xl transition-all duration-300 hover:border-green-300 hover:-translate-y-1">
+                    <div class="w-16 h-16 bg-gradient-to-r from-green-400 to-green-500 rounded-full flex items-center justify-center mb-4 mx-auto text-white">
+                        <i class="fas fa-tractor text-2xl"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-center mb-2 text-green-800">农机贷</h3>
+                    <p class="text-gray-600 text-center mb-4">购买农业机械设备专项贷款</p>
+                    <div class="space-y-3 mb-4">
+                        <div class="flex justify-between items-center py-2 border-b border-green-50">
+                            <span class="text-gray-600">年利率</span>
+                            <span class="font-bold text-green-600">5.20%</span>
+                        </div>
+                        <div class="flex justify-between items-center py-2 border-b border-green-50">
+                            <span class="text-gray-600">最高额度</span>
+                            <span class="font-bold text-green-600">¥100万</span>
+                        </div>
+                        <div class="flex justify-between items-center py-2 border-b border-green-50">
+                            <span class="text-gray-600">期限</span>
+                            <span class="font-bold text-green-600">3-5年</span>
+                        </div>
+                    </div>
+                    <button
+                        class="w-full bg-gradient-to-r from-green-500 to-green-600 text-white py-3 !rounded-button whitespace-nowrap hover:from-green-600 hover:to-green-700 transition-all duration-300 shadow-md hover:shadow-lg">立即申请</button>
+                </div>
+
+                <!-- 产品3 -->
+                <div class="product-card bg-white rounded-xl shadow-lg border border-green-100 p-6 hover:shadow-xl transition-all duration-300 hover:border-green-300 hover:-translate-y-1">
+                    <div class="w-16 h-16 bg-gradient-to-r from-green-400 to-green-500 rounded-full flex items-center justify-center mb-4 mx-auto text-white">
+                        <i class="fas fa-leaf text-2xl"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-center mb-2 text-green-800">种植贷</h3>
+                    <p class="text-gray-600 text-center mb-4">农作物种植专项资金支持</p>
+                    <div class="space-y-3 mb-4">
+                        <div class="flex justify-between items-center py-2 border-b border-green-50">
+                            <span class="text-gray-600">年利率</span>
+                            <span class="font-bold text-green-600">4.50%</span>
+                        </div>
+                        <div class="flex justify-between items-center py-2 border-b border-green-50">
+                            <span class="text-gray-600">最高额度</span>
+                            <span class="font-bold text-green-600">¥30万</span>
+                        </div>
+                        <div class="flex justify-between items-center py-2 border-b border-green-50">
+                            <span class="text-gray-600">期限</span>
+                            <span class="font-bold text-green-600">1-2年</span>
+                        </div>
+                    </div>
+                    <button
+                        class="w-full bg-gradient-to-r from-green-500 to-green-600 text-white py-3 !rounded-button whitespace-nowrap hover:from-green-600 hover:to-green-700 transition-all duration-300 shadow-md hover:shadow-lg">立即申请</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 贷款流程和计算器 -->
+    <section class="py-16 bg-gray-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                <!-- 贷款流程 -->
+                <div>
+                    <h2 class="text-3xl font-bold text-gray-900 mb-8">贷款流程</h2>
+                    <div class="space-y-6">
+                        <div class="flex items-start space-x-4">
+                            <div
+                                class="w-8 h-8 bg-green-600 text-white rounded-full flex items-center justify-center font-semibold">
+                                1</div>
+                            <div>
+                                <h3 class="text-lg font-semibold text-gray-900">在线申请</h3>
+                                <p class="text-gray-600">填写基本信息，提交贷款申请</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start space-x-4">
+                            <div
+                                class="w-8 h-8 bg-green-600 text-white rounded-full flex items-center justify-center font-semibold">
+                                2</div>
+                            <div>
+                                <h3 class="text-lg font-semibold text-gray-900">资料审核</h3>
+                                <p class="text-gray-600">提交相关证明材料，等待审核</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start space-x-4">
+                            <div
+                                class="w-8 h-8 bg-green-600 text-white rounded-full flex items-center justify-center font-semibold">
+                                3</div>
+                            <div>
+                                <h3 class="text-lg font-semibold text-gray-900">实地考察</h3>
+                                <p class="text-gray-600">工作人员实地考察，评估风险</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start space-x-4">
+                            <div
+                                class="w-8 h-8 bg-green-600 text-white rounded-full flex items-center justify-center font-semibold">
+                                4</div>
+                            <div>
+                                <h3 class="text-lg font-semibold text-gray-900">审批放款</h3>
+                                <p class="text-gray-600">审批通过，资金快速到账</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 贷款计算器 -->
+                <div>
+                    <h2 class="text-3xl font-bold text-gray-900 mb-8">贷款计算器</h2>
+                    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">贷款金额 (¥)</label>
+                                <input type="number" class="calculator-input w-full px-3 py-2 border rounded-md"
+                                    placeholder="请输入贷款金额" value="100000">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">贷款期限 (月)</label>
+                                <input type="number" class="calculator-input w-full px-3 py-2 border rounded-md"
+                                    placeholder="请输入贷款期限" value="12">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">年利率 (%)</label>
+                                <input type="number" class="calculator-input w-full px-3 py-2 border rounded-md"
+                                    placeholder="请输入年利率" value="4.85">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">还款方式</label>
+                                <select class="calculator-input w-full px-3 py-2 border rounded-md">
+                                    <option>等额本息</option>
+                                    <option>等额本金</option>
+                                    <option>先息后本</option>
+                                </select>
+                            </div>
+                            <button
+                                class="w-full bg-green-600 text-white py-2 !rounded-button whitespace-nowrap hover:bg-green-700 transition-colors">计算月供</button>
+                        </div>
+                        <div class="mt-6 p-4 bg-gray-50 rounded-md">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <p class="text-sm text-gray-600">月还款额</p>
+                                    <p class="text-xl font-semibold text-green-600">¥8,547.23</p>
+                                </div>
+                                <div>
+                                    <p class="text-sm text-gray-600">总利息</p>
+                                    <p class="text-xl font-semibold text-green-600">¥2,566.76</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 最新政策资讯 -->
+    <section class="py-16 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-12">
+                <h2 class="text-3xl font-bold text-gray-900 mb-4">最新政策资讯</h2>
+                <p class="text-gray-600">了解最新农业政策，把握发展机遇</p>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div class="bg-gray-50 rounded-lg p-6 hover:shadow-md transition-shadow">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-2">2024年农业贷款新政策解读</h3>
+                    <p class="text-gray-600 text-sm mb-4">详细解读最新农业贷款政策变化，帮助农民朋友更好地了解贷款条件和优惠政策。</p>
+                    <span class="text-xs text-gray-500">2024-01-15</span>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-6 hover:shadow-md transition-shadow">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-2">春耕备耕专项贷款服务</h3>
+                    <p class="text-gray-600 text-sm mb-4">针对春耕备耕推出的专项贷款服务，利率优惠，审批快速，助力农业生产。</p>
+                    <span class="text-xs text-gray-500">2024-01-14</span>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-6 hover:shadow-md transition-shadow">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-2">农村金融扶持计划发布</h3>
+                    <p class="text-gray-600 text-sm mb-4">政府发布农村金融扶持计划，加大对农业贷款的支持力度，降低农民融资成本。</p>
+                    <span class="text-xs text-gray-500">2024-01-13</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 常见问题 -->
+    <section class="py-16 bg-gray-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-12">
+                <h2 class="text-3xl font-bold text-gray-900 mb-4">常见问题</h2>
+                <p class="text-gray-600">解答您关心的贷款问题</p>
+            </div>
+            <div class="space-y-4 max-w-3xl mx-auto">
+                <div class="faq-item bg-white rounded-lg shadow-sm border border-gray-200">
+                    <button class="w-full px-6 py-4 text-left flex justify-between items-center">
+                        <span class="font-medium text-gray-900">如何申请农民信用贷款？</span>
+                        <i class="fas fa-chevron-down text-gray-400"></i>
+                    </button>
+                    <div class="px-6 py-4 border-t border-gray-200 hidden">
+                        <p class="text-gray-600">申请农民信用贷款需要提供身份证明、土地承包合同、种植或养殖证明、收入证明等材料，通过线上申请或线下网点办理。</p>
+                    </div>
+                </div>
+                <div class="faq-item bg-white rounded-lg shadow-sm border border-gray-200">
+                    <button class="w-full px-6 py-4 text-left flex justify-between items-center">
+                        <span class="font-medium text-gray-900">贷款需要什么条件？</span>
+                        <i class="fas fa-chevron-down text-gray-400"></i>
+                    </button>
+                    <div class="px-6 py-4 border-t border-gray-200 hidden">
+                        <p class="text-gray-600">申请人需年满18周岁，具有完全民事行为能力，有稳定的农业收入来源，信用记录良好，能够提供相应的担保或抵押。</p>
+                    </div>
+                </div>
+                <div class="faq-item bg-white rounded-lg shadow-sm border border-gray-200">
+                    <button class="w-full px-6 py-4 text-left flex justify-between items-center">
+                        <span class="font-medium text-gray-900">审核需要多长时间？</span>
+                        <i class="fas fa-chevron-down text-gray-400"></i>
+                    </button>
+                    <div class="px-6 py-4 border-t border-gray-200 hidden">
+                        <p class="text-gray-600">一般情况下，资料齐全的申请在3-5个工作日内完成审核，特殊情况可能需要实地考察，时间会相应延长。</p>
+                    </div>
+                </div>
+                <div class="faq-item bg-white rounded-lg shadow-sm border border-gray-200">
+                    <button class="w-full px-6 py-4 text-left flex justify-between items-center">
+                        <span class="font-medium text-gray-900">可以提前还款吗？</span>
+                        <i class="fas fa-chevron-down text-gray-400"></i>
+                    </button>
+                    <div class="px-6 py-4 border-t border-gray-200 hidden">
+                        <p class="text-gray-600">可以提前还款，提前还款不收取违约金，但需要提前一个月向银行申请，按照实际用款天数计算利息。</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 底部信息栏 -->
+    <footer class="bg-gray-900 text-white py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                <div>
+                    <div class="text-2xl font-['Pacifico'] text-primary mb-4">logo</div>
+                    <p class="text-gray-400 mb-4">专业农民信用贷款服务，助力农业发展，服务农民朋友。</p>
+                    <div class="flex space-x-4">
+                        <i class="fab fa-weibo text-xl cursor-pointer hover:text-green-600 transition-colors"></i>
+                        <i class="fab fa-weixin text-xl cursor-pointer hover:text-green-600 transition-colors"></i>
+                        <i class="fab fa-qq text-xl cursor-pointer hover:text-green-600 transition-colors"></i>
+                    </div>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold mb-4">联系方式</h3>
+                    <div class="space-y-2 text-gray-400">
+                        <p>客服热线：400-123-4567</p>
+                        <p>邮箱：service@farmerloan.com</p>
+                        <p>地址：北京市朝阳区农业金融大厦</p>
+                    </div>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold mb-4">快速链接</h3>
+                    <div class="space-y-2">
+                        <a href="#" class="block text-gray-400 hover:text-green-400 transition-colors">贷款产品</a>
+                        <a href="#" class="block text-gray-400 hover:text-green-400 transition-colors">政策资讯</a>
+                        <a href="#" class="block text-gray-400 hover:text-green-400 transition-colors">申请流程</a>
+                        <a href="#" class="block text-gray-400 hover:text-green-400 transition-colors">帮助中心</a>
+                    </div>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold mb-4">友情链接</h3>
+                    <div class="space-y-2">
+                        <a href="#" class="block text-gray-400 hover:text-green-400 transition-colors">农业农村部</a>
+                        <a href="#" class="block text-gray-400 hover:text-green-400 transition-colors">中国农业银行</a>
+                        <a href="#" class="block text-gray-400 hover:text-green-400 transition-colors">农村信用社</a>
+                        <a href="#" class="block text-gray-400 hover:text-green-400 transition-colors">农业保险</a>
+                    </div>
+                </div>
+            </div>
+            <div class="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400">
+                <p>&copy; 2024 农民信用贷款系统. 保留所有权利. 京ICP备12345678号</p>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // 轮播图功能
+        document.addEventListener('DOMContentLoaded', function () {
+            const faqItems = document.querySelectorAll('.faq-item');
+            faqItems.forEach(item => {
+                const button = item.querySelector('button');
+                const content = item.querySelector('div');
+
+                button.addEventListener('click', () => {
+                    const isOpen = !content.classList.contains('hidden');
+                    if (isOpen) {
+                        content.classList.add('hidden');
+                        button.querySelector('i').classList.remove('fa-chevron-up');
+                        button.querySelector('i').classList.add('fa-chevron-down');
+                    } else {
+                        content.classList.remove('hidden');
+                        button.querySelector('i').classList.remove('fa-chevron-down');
+                        button.querySelector('i').classList.add('fa-chevron-up');
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+
+</html>
