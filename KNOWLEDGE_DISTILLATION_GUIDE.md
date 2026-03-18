@@ -6,10 +6,11 @@
 1. [什么是知识蒸馏](#什么是知识蒸馏)
 2. [快速开始](#快速开始)
 3. [详细配置](#详细配置)
-4. [使用方法](#使用方法)
-5. [代码示例](#代码示例)
-6. [调参建议](#调参建议)
-7. [故障排查](#故障排查)
+4. [蒸馏模式说明](#蒸馏模式说明)
+5. [使用方法](#使用方法)
+6. [代码示例](#代码示例)
+7. [调参建议](#调参建议)
+8. [故障排查](#故障排查)
 
 ---
 
@@ -81,7 +82,9 @@ python src/dprt/train.py \
       "teacher_checkpoint": "path/to/teacher.pt",
       "freeze_teacher": true,
       "temperature": 4.0,
-      "alpha": 0.5
+      "alpha": 0.5,
+      "distill_mode": "top_k",
+      "top_k": 50
     }
   }
 }
@@ -95,6 +98,8 @@ python src/dprt/train.py \
 | `freeze_teacher` | bool | 是否冻结教师模型参数（不更新） | `true` |
 | `temperature` | float | 温度参数，软化概率分布<br>- 值越大，分布越平滑<br>- 典型范围：1-10 | `4.0` |
 | `alpha` | float | 蒸馏损失权重<br>- `alpha=0.5`: 蒸馏损失和学生损失各占50%<br>- `alpha=0.7`: 蒸馏损失占70%<br>- 范围：0.0-1.0 | `0.5` |
+| `distill_mode` | string | 蒸馏模式，详见下文 | `'top_k'` |
+| `top_k` | int | 仅当 `distill_mode='top_k'` 时有效<br>从教师预测中选取置信度最高的K个框 | `50` |
 
 ### 学生模型配置
 
@@ -127,77 +132,128 @@ python src/dprt/train.py \
 
 ---
 
+## 蒸馏模式说明
+
+当前支持以下四种蒸馏模式，可通过配置文件中的 `distill_mode` 参数指定：
+
+| 模式 | 配置值 | 说明 | 适用场景 |
+|------|--------|------|---------|
+| 全量蒸馏 | `"all"` | 蒸馏所有queries（可能含大量背景框） | 学生/教师架构相同 |
+| 匹配蒸馏 | `"matched"` | 仅蒸馏与GT匹配的queries（稳定，推荐） | 标准蒸馏首选 |
+| **Top-K蒸馏** | **`"top_k"`** | **只蒸馏教师置信度最高的K个预测** | **过滤背景噪声** |
+| **加权蒸馏** | **`"weighted"`** | **蒸馏所有queries但按教师置信度加权** | **柔性背景抑制** |
+
+### `distill_mode: "all"` — 全量蒸馏
+- **行为**：将所有queries（最多 min(N_student, N_teacher) 个）用于蒸馏
+- **优点**：实现简单，无需额外匹配开销
+- **缺点**：包含大量背景框，信号嘈杂
+
+### `distill_mode: "matched"` — 匹配蒸馏（推荐）
+- **行为**：通过匈牙利算法将学生预测与GT框匹配，只蒸馏命中GT的预测
+- **优点**：蒸馏信号准确，训练更稳定
+- **缺点**：需要额外的匹配计算
+
+### `distill_mode: "top_k"` — Top-K蒸馏 ⭐新增
+- **行为**：计算教师每个query的最大类别概率（置信度），选取置信度最高的K个query进行蒸馏
+- **优点**：
+  - 有效过滤低置信度背景预测
+  - 聚焦于教师最确定的、信息最丰富的预测
+  - 不依赖GT标注（纯teacher-student交互）
+- **参数**：需设置 `top_k`（推荐范围：20–100）
+- **配置示例**：
+  ```json
+  "distillation": {
+    "distill_mode": "top_k",
+    "top_k": 50,
+    "temperature": 4.0,
+    "alpha": 0.5
+  }
+  ```
+
+### `distill_mode: "weighted"` — 加权蒸馏 ⭐新增
+- **行为**：蒸馏所有共享queries，但以教师置信度分数作为每个query的损失权重
+  - 高置信度预测 → 权重高 → 对蒸馏信号贡献大
+  - 低置信度预测（背景） → 权重低 → 贡献小
+- **优点**：
+  - 不丢弃任何预测（比top_k更柔和的过滤方式）
+  - 背景噪声被自然抑制而非硬截断
+  - 无额外超参（无需设置K值）
+- **配置示例**：
+  ```json
+  "distillation": {
+    "distill_mode": "weighted",
+    "temperature": 4.0,
+    "alpha": 0.5
+  }
+  ```
+
+---
+
 ## 使用方法
 
 ### 方法 1: 使用配置文件（推荐）
 
-创建配置文件 `config/my_distillation.json`：
-```json
-{
-  "train": {
-    "distillation": {
-      "teacher_checkpoint": "checkpoints/teacher_model.pt",
-      "freeze_teacher": true,
-      "temperature": 4.0,
-      "alpha": 0.5
-    }
-  }
-}
-```
-
-运行训练：
+#### 使用 Top-K 蒸馏
 ```bash
 python src/dprt/train.py \
     --src /data/kradar \
-    --cfg config/my_distillation.json \
-    --dst outputs/distillation_exp1
+    --cfg config/kradar_distillation_topk.json \
+    --dst outputs/distillation_topk
+```
+
+#### 使用加权蒸馏
+```bash
+python src/dprt/train.py \
+    --src /data/kradar \
+    --cfg config/kradar_distillation_weighted.json \
+    --dst outputs/distillation_weighted
+```
+
+#### 使用匹配蒸馏（原有推荐方式）
+```bash
+python src/dprt/train.py \
+    --src /data/kradar \
+    --cfg config/kradar_distillation_light.json \
+    --dst outputs/distillation_matched
 ```
 
 ### 方法 2: 编程方式使用
 
 ```python
 from dprt.training.loss import DistillationLoss, KDLoss
-from dprt.training.trainer import KnowledgeDistillationTrainer
+from dprt.training.trainer import build_trainer
 from dprt.training.loss import Loss
 import torch
 
-# 1. 加载教师模型
-teacher_model = torch.load("checkpoints/teacher_model.pt")
-teacher_model.eval()
-
-# 2. 创建学生损失（标准检测损失）
+# 1. 创建学生损失（标准检测损失）
 student_loss = Loss.from_config(config['train'])
 
-# 3. 创建蒸馏损失
+# 2. 创建 Top-K 蒸馏损失
 distillation_loss = DistillationLoss(
     temperature=4.0,
-    alpha=0.5,
     distill_class=True,
     distill_bbox=True,
+    distill_mode='top_k',
+    top_k=50,
     reduction='mean'
 )
 
-# 4. 组合损失
+# 或者创建加权蒸馏损失
+distillation_loss_w = DistillationLoss(
+    temperature=4.0,
+    distill_mode='weighted',
+    reduction='mean'
+)
+
+# 3. 组合损失
 kd_loss = KDLoss(
     student_loss=student_loss,
     distillation_loss=distillation_loss,
     alpha=0.5
 )
 
-# 5. 创建蒸馏训练器
-trainer = KnowledgeDistillationTrainer(
-    teacher_model=teacher_model,
-    teacher_checkpoint=None,
-    freeze_teacher=True,
-    epochs=200,
-    optimizer=optimizer,
-    loss=kd_loss,
-    scheduler=scheduler,
-    metric=metric,
-    device='cuda'
-)
-
-# 6. 开始训练
+# 4. 使用 build_trainer 自动构建（推荐）
+trainer = build_trainer(config)
 trainer.train(student_model, train_loader, val_loader, dst='outputs')
 ```
 
@@ -216,7 +272,7 @@ from dprt.datasets.kradar import KRadarDataset
 from torch.utils.data import DataLoader
 
 # 加载配置
-config = load_config('config/kradar_distillation_example.json')
+config = load_config('config/kradar_distillation_topk.json')
 
 # 创建数据集
 train_dataset = KRadarDataset(...)
@@ -242,12 +298,22 @@ trainer.train(
 ```python
 from dprt.training.loss import DistillationLoss
 
-# 只蒸馏分类logits，不蒸馏bbox
+# 只蒸馏分类logits，不蒸馏bbox（Top-K模式）
 distillation_loss = DistillationLoss(
     temperature=3.0,
-    alpha=0.6,
     distill_class=True,
     distill_bbox=False,
+    distill_mode='top_k',
+    top_k=30,
+    reduction='mean'
+)
+
+# 全部蒸馏，加权模式
+distillation_loss_w = DistillationLoss(
+    temperature=5.0,
+    distill_class=True,
+    distill_bbox=True,
+    distill_mode='weighted',
     reduction='mean'
 )
 ```
@@ -287,7 +353,27 @@ trainer.train(student_model, train_loader, val_loader)
 | α=0.7 | 30%学生损失 + 70%蒸馏损失 | 强调学习教师 |
 | α=1.0 | 100%蒸馏损失 | 纯蒸馏（不推荐） |
 
-### 3. 学习率调整
+### 3. Top-K 参数调优建议
+
+| top_k 值 | 占总queries比例（400个） | 效果 |
+|----------|-------------------------|------|
+| 20-30 | ~5-8% | 极度聚焦，只蒸馏高置信前景 |
+| **50** | **~12.5%（推荐）** | **平衡的前景过滤** |
+| 100 | ~25% | 较宽松的过滤 |
+| 200+ | ~50%+ | 接近 `all` 模式 |
+
+### 4. 蒸馏模式对比选择指南
+
+```
+问题：学生模型与教师架构相同？
+├── 是 → 优先尝试 'matched'，其次 'top_k'
+└── 否（学生更小）
+    ├── 有GT标注，信号准确 → 'matched'
+    ├── 想过滤背景但保留灵活性 → 'top_k'（top_k=50）
+    └── 想柔和地抑制背景 → 'weighted'
+```
+
+### 5. 学习率调整
 
 使用蒸馏时，学习率通常可以适当提高：
 ```json
@@ -299,7 +385,7 @@ trainer.train(student_model, train_loader, val_loader)
 }
 ```
 
-### 4. Epoch数量
+### 6. Epoch数量
 
 蒸馏训练通常收敛更快：
 - **标准训练**：200 epochs
@@ -353,6 +439,7 @@ RuntimeError: CUDA out of memory
 - [ ] 调整alpha（0.5→0.7）
 - [ ] 增加训练epochs
 - [ ] 检查学生模型是否太小
+- [ ] 尝试切换蒸馏模式（'all' → 'top_k' → 'weighted'）
 
 ### 问题 4: 损失函数不匹配
 
@@ -403,9 +490,11 @@ tensorboard --logdir outputs/distillation/[timestamp]
 |------|----------|--------|-----|---------|
 | 教师模型 | ResNet101 | 85M | 12 | 0.72 |
 | 学生模型（无蒸馏） | ResNet50 | 44M | 28 | 0.64 |
-| **学生模型（蒸馏）** | **ResNet50** | **44M** | **28** | **0.69** ✨ |
+| **学生模型（'all'蒸馏）** | **ResNet50** | **44M** | **28** | **0.66** |
+| **学生模型（'top_k'蒸馏）** | **ResNet50** | **44M** | **28** | **0.68** ✨ |
+| **学生模型（'weighted'蒸馏）** | **ResNet50** | **44M** | **28** | **0.69** ✨ |
 
-性能提升：+5% mAP，速度提升2.3x
+> 注：以上数值为示意，实际精度取决于数据集和超参数设置。
 
 ---
 

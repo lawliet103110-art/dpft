@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from dprt.evaluation.metric import build_metric
 from dprt.training.optimizer import build_optimizer
-from dprt.training.loss import build_loss
+from dprt.training.loss import build_loss, KDLoss
 from dprt.training.scheduler import build_scheduler
 
 
@@ -26,7 +26,8 @@ class CentralizedTrainer():
                  metric: torch.nn.modules.loss._Loss = None,
                  device: str = None,
                  logging: str = None,
-                 evaluating: int = 1):
+                 evaluating: int = 1,
+                 teacher_model: torch.nn.Module = None):
         """
         Arguments:
             logging: Logging frequency. One of either None,
@@ -35,6 +36,11 @@ class CentralizedTrainer():
                 -1 means no evaluation, 0 means an evaluation
                 after every step and evey value > 0 descibes the
                 number of epoch after which an evaluation is executed.
+            teacher_model: Optional pre-trained teacher model used for
+                knowledge distillation.  When provided and loss_fn is a
+                KDLoss, the teacher's forward pass is run (without
+                gradient) alongside the student and its outputs are
+                passed to the loss function.
         """
         # Initialize instance arrtibutes
         self.epochs = epochs
@@ -45,6 +51,7 @@ class CentralizedTrainer():
         self.device = device
         self.logging = logging
         self.evaluating = evaluating
+        self.teacher_model = teacher_model
 
     @classmethod
     def from_config(cls,
@@ -70,6 +77,19 @@ class CentralizedTrainer():
         device = torch.device(config['computing']['device'])
         logging = config['train'].get('logging')
 
+        # Load teacher model when a distillation config is present
+        teacher_model = None
+        distill_cfg = config['train'].get('distillation')
+        if distill_cfg is not None:
+            teacher_checkpoint = distill_cfg.get('teacher_checkpoint')
+            if teacher_checkpoint is not None:
+                teacher_model = torch.load(teacher_checkpoint, map_location=device)
+                teacher_model.to(device)
+                if distill_cfg.get('freeze_teacher', True):
+                    for param in teacher_model.parameters():
+                        param.requires_grad = False
+                teacher_model.eval()
+
         return cls(
             epochs=epochs,
             optimizer=optimizer,
@@ -77,7 +97,8 @@ class CentralizedTrainer():
             scheduler=scheduler,
             metric=metric,
             device=device,
-            logging=logging
+            logging=logging,
+            teacher_model=teacher_model,
         )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
@@ -125,7 +146,13 @@ class CentralizedTrainer():
             output = model(data)
 
             # Compute the loss and its gradients
-            loss, losses = self.loss_fn(output, labels)
+            if isinstance(self.loss_fn, KDLoss) and self.teacher_model is not None:
+                # Knowledge distillation: obtain teacher outputs without gradients
+                with torch.no_grad():
+                    teacher_output = self.teacher_model(data)
+                loss, losses = self.loss_fn(output, teacher_output, labels)
+            else:
+                loss, losses = self.loss_fn(output, labels)
 
             # Adjust weights
             if loss > 0:
@@ -180,7 +207,14 @@ class CentralizedTrainer():
             output = model(data)
 
             # Compute the loss and its gradients
-            loss, losses = self.loss_fn(output, labels)
+            if isinstance(self.loss_fn, KDLoss) and self.teacher_model is not None:
+                # The @torch.no_grad() decorator on this method disables gradient
+                # computation for the entire validation loop, including the teacher
+                # forward pass below.
+                teacher_output = self.teacher_model(data)
+                loss, losses = self.loss_fn(output, teacher_output, labels)
+            else:
+                loss, losses = self.loss_fn(output, labels)
 
             # Evaluate model output
             metrics = self.eval_fn(output, labels)
@@ -214,6 +248,10 @@ class CentralizedTrainer():
               start_epoch: int = 0, timestamp: str = None, dst: str = None) -> None:
         # Load model (to device)
         model.to(self.device)
+
+        # Load teacher model to device (if present)
+        if self.teacher_model is not None:
+            self.teacher_model.to(self.device)
 
         # Get current timestamp
         if timestamp is None:

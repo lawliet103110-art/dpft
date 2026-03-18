@@ -587,6 +587,7 @@ class DistillationLoss(nn.modules.loss._Loss):
                  distill_class: bool = True,
                  distill_bbox: bool = True,
                  distill_mode: str = 'matched',
+                 top_k: int = 50,
                  reduction: str = 'mean',
                  **kwargs):
         """Knowledge Distillation Loss for 3D Object Detection.
@@ -602,7 +603,15 @@ class DistillationLoss(nn.modules.loss._Loss):
             distill_mode: Distillation mode. Options:
                 - 'all': Distill all queries (may include background boxes)
                 - 'matched': Only distill queries matched to GT (recommended)
+                - 'top_k': Distill only the teacher's top-K most confident
+                    queries. Filters out background noise and focuses on
+                    informative predictions. Requires the 'top_k' parameter.
+                - 'weighted': Distill all queries but weight each query's loss
+                    by the teacher's confidence score. High-confidence teacher
+                    predictions contribute more to the distillation signal.
                 Default: 'matched'
+            top_k: Number of top-confidence teacher queries to distill when
+                distill_mode='top_k'. Must be > 0. Default: 50
             reduction: Reduction mode for loss values. One of 'none', 'mean', 'sum'.
 
         Reference:
@@ -615,6 +624,7 @@ class DistillationLoss(nn.modules.loss._Loss):
         self.distill_class = distill_class
         self.distill_bbox = distill_bbox
         self.distill_mode = distill_mode
+        self.top_k = top_k
         self.reduction = reduction
 
         # Check input arguments
@@ -624,20 +634,29 @@ class DistillationLoss(nn.modules.loss._Loss):
                 f"\n Supported reduction modes: 'none', 'mean', 'sum'"
             )
 
-        if self.distill_mode not in {'all', 'matched'}:
+        if self.distill_mode not in {'all', 'matched', 'top_k', 'weighted'}:
             raise ValueError(
                 f"Invalid value for arg 'distill_mode': '{self.distill_mode}'"
-                f"\n Supported modes: 'all', 'matched'"
+                f"\n Supported modes: 'all', 'matched', 'top_k', 'weighted'"
+            )
+
+        if self.distill_mode == 'top_k' and self.top_k <= 0:
+            raise ValueError(
+                f"Invalid value for arg 'top_k': {self.top_k}"
+                f"\n top_k must be a positive integer"
             )
 
     def distillation_loss_class(self,
                                 student_logits: torch.Tensor,
-                                teacher_logits: torch.Tensor) -> torch.Tensor:
+                                teacher_logits: torch.Tensor,
+                                weights: torch.Tensor = None) -> torch.Tensor:
         """Compute KL divergence loss for classification logits.
 
         Arguments:
             student_logits: Student model classification logits (B, N, num_classes)
             teacher_logits: Teacher model classification logits (B, N, num_classes)
+            weights: Optional per-query weights with shape (B, N) or (N,).
+                Used by 'weighted' mode to scale each query's contribution.
 
         Returns:
             loss: KL divergence loss between soft distributions
@@ -651,19 +670,26 @@ class DistillationLoss(nn.modules.loss._Loss):
         loss = F.kl_div(student_soft, teacher_soft, reduction='none') * (self.temperature ** 2)
 
         # Reduce over class dimension
-        loss = loss.sum(dim=-1)  # (B, N)
+        loss = loss.sum(dim=-1)  # (B, N) or (N,)
+
+        # Apply per-query weights when provided
+        if weights is not None:
+            loss = loss * weights
 
         return loss
 
     def distillation_loss_bbox(self,
                                student_bbox: torch.Tensor,
-                               teacher_bbox: torch.Tensor) -> torch.Tensor:
+                               teacher_bbox: torch.Tensor,
+                               weights: torch.Tensor = None) -> torch.Tensor:
         """Compute L1 loss for bounding box regression outputs.
 
         Arguments:
             student_bbox: Student model bbox predictions (B, N, 8)
                 Format: (x, y, z, l, w, h, sin_a, cos_a)
             teacher_bbox: Teacher model bbox predictions (B, N, 8)
+            weights: Optional per-query weights with shape (B, N) or (N,).
+                Used by 'weighted' mode to scale each query's contribution.
 
         Returns:
             loss: L1 loss between student and teacher bbox predictions
@@ -672,7 +698,11 @@ class DistillationLoss(nn.modules.loss._Loss):
         loss = F.l1_loss(student_bbox, teacher_bbox, reduction='none')
 
         # Reduce over bbox dimension
-        loss = loss.mean(dim=-1)  # (B, N)
+        loss = loss.mean(dim=-1)  # (B, N) or (N,)
+
+        # Apply per-query weights when provided
+        if weights is not None:
+            loss = loss * weights
 
         return loss
 
@@ -746,6 +776,43 @@ class DistillationLoss(nn.modules.loss._Loss):
             has_matches = True
             student_selected = None  # Will use slicing instead
             teacher_selected = None
+
+        elif self.distill_mode == 'top_k':
+            # Top-K mode: Distill only the teacher's top-K most confident queries.
+            # Confidence is derived from the teacher's maximum class probability.
+            # This filters out background noise and focuses distillation on the
+            # most informative teacher predictions.
+            has_matches = True
+            student_selected = None
+            teacher_selected = None
+
+            # Compute teacher confidence: max class probability after softmax
+            teacher_conf = F.softmax(teacher_outputs['class'], dim=-1).max(dim=-1).values  # (B, N_teacher)
+
+            # effective_k: honour the requested top_k but cap at the smaller query
+            # count so gather indices are always valid for both models.
+            effective_k = min(self.top_k, N_teacher, N_student)
+            # topk returns (values, indices); we only need the indices
+            teacher_topk_indices = teacher_conf.topk(effective_k, dim=-1).indices  # (B, effective_k)
+            # Map teacher top-K indices to student query space.
+            # NOTE: this assumes that query positions are roughly aligned between
+            # teacher and student (i.e. both models use the same static query grid).
+            # If the student has fewer queries, higher-index teacher queries are
+            # clamped to the last student query slot.
+            student_topk_indices = torch.clamp(teacher_topk_indices, 0, N_student - 1)  # (B, effective_k)
+
+        elif self.distill_mode == 'weighted':
+            # Weighted mode: Distill all queries but scale each query's loss by
+            # the teacher's confidence score.  High-confidence teacher predictions
+            # are rewarded more, which naturally suppresses background noise
+            # without discarding any queries.
+            has_matches = True
+            student_selected = None
+            teacher_selected = None
+
+            # Compute per-query confidence weights from teacher class probabilities
+            teacher_conf = F.softmax(teacher_outputs['class'], dim=-1).max(dim=-1).values  # (B, N_teacher)
+
         else:
             has_matches = False
 
@@ -767,6 +834,31 @@ class DistillationLoss(nn.modules.loss._Loss):
 
                     class_loss = self.distillation_loss_class(student_class, teacher_class)
                     losses['distill_class'] = class_loss
+
+            elif self.distill_mode == 'top_k':
+                # Gather teacher top-K logits and the corresponding student logits.
+                # teacher_topk_indices / student_topk_indices are pre-computed in
+                # the mode-selection block above.
+                teacher_class = teacher_outputs['class'].gather(
+                    1, teacher_topk_indices.unsqueeze(-1).expand(-1, -1, teacher_outputs['class'].shape[-1])
+                )  # (B, effective_k, num_classes)
+                student_class = student_outputs['class'].gather(
+                    1, student_topk_indices.unsqueeze(-1).expand(-1, -1, student_outputs['class'].shape[-1])
+                )  # (B, effective_k, num_classes)
+
+                class_loss = self.distillation_loss_class(student_class, teacher_class)
+                losses['distill_class'] = class_loss
+
+            elif self.distill_mode == 'weighted':
+                # Distill all shared queries, weighted by teacher confidence
+                N_distill = min(N_student, N_teacher)
+                student_class = student_outputs['class'][:, :N_distill]
+                teacher_class = teacher_outputs['class'][:, :N_distill]
+                weights = teacher_conf[:, :N_distill]  # (B, N_distill)
+
+                class_loss = self.distillation_loss_class(student_class, teacher_class, weights=weights)
+                losses['distill_class'] = class_loss
+
             else:
                 # 'all' mode: distill min(N_student, N_teacher) queries
                 N_distill = min(N_student, N_teacher)
@@ -800,6 +892,40 @@ class DistillationLoss(nn.modules.loss._Loss):
 
                         bbox_loss = self.distillation_loss_bbox(student_bbox, teacher_bbox)
                         losses['distill_bbox'] = bbox_loss
+
+                elif self.distill_mode == 'top_k':
+                    # Gather teacher top-K bbox predictions and the corresponding
+                    # student predictions using the indices pre-computed above.
+                    teacher_bbox_parts = []
+                    student_bbox_parts = []
+                    for bk in bbox_keys:
+                        feat_dim = teacher_outputs[bk].shape[-1]
+                        teacher_bbox_parts.append(
+                            teacher_outputs[bk].gather(
+                                1, teacher_topk_indices.unsqueeze(-1).expand(-1, -1, feat_dim)
+                            )
+                        )
+                        student_bbox_parts.append(
+                            student_outputs[bk].gather(
+                                1, student_topk_indices.unsqueeze(-1).expand(-1, -1, feat_dim)
+                            )
+                        )
+                    teacher_bbox = torch.cat(teacher_bbox_parts, dim=-1)  # (B, effective_k, 8)
+                    student_bbox = torch.cat(student_bbox_parts, dim=-1)
+
+                    bbox_loss = self.distillation_loss_bbox(student_bbox, teacher_bbox)
+                    losses['distill_bbox'] = bbox_loss
+
+                elif self.distill_mode == 'weighted':
+                    # Distill all shared queries, weighted by teacher confidence
+                    N_distill = min(N_student, N_teacher)
+                    student_bbox = torch.cat([student_outputs[k][:, :N_distill] for k in bbox_keys], dim=-1)
+                    teacher_bbox = torch.cat([teacher_outputs[k][:, :N_distill] for k in bbox_keys], dim=-1)
+                    weights = teacher_conf[:, :N_distill]  # (B, N_distill)
+
+                    bbox_loss = self.distillation_loss_bbox(student_bbox, teacher_bbox, weights=weights)
+                    losses['distill_bbox'] = bbox_loss
+
                 else:
                     # 'all' mode: distill min(N_student, N_teacher) queries
                     N_distill = min(N_student, N_teacher)
@@ -937,5 +1063,43 @@ class KDLoss(nn.modules.loss._Loss):
         return total_loss, all_losses
 
 
-def build_loss(*args, **kwargs):
-    return Loss.from_config(*args, **kwargs)
+def build_loss(config: Dict[str, Any], *args, **kwargs):
+    """Build loss function from configuration.
+
+    When the config contains a 'distillation' key, returns a KDLoss that
+    combines the standard detection loss with knowledge distillation.
+    Otherwise returns a standard Loss.
+
+    Arguments:
+        config: Training configuration dictionary (the 'train' section).
+
+    Returns:
+        loss: Loss module (Loss or KDLoss).
+    """
+    student_loss = Loss.from_config(config, *args, **kwargs)
+
+    distill_cfg = config.get('distillation')
+    if distill_cfg is None:
+        return student_loss
+
+    # Build DistillationLoss from the 'distillation' sub-config
+    temperature = distill_cfg.get('temperature', 4.0)
+    distill_mode = distill_cfg.get('distill_mode', 'matched')
+    top_k = distill_cfg.get('top_k', 50)
+    distill_class = distill_cfg.get('distill_class', True)
+    distill_bbox = distill_cfg.get('distill_bbox', True)
+    alpha = distill_cfg.get('alpha', 0.5)
+
+    distillation_loss = DistillationLoss(
+        temperature=temperature,
+        distill_class=distill_class,
+        distill_bbox=distill_bbox,
+        distill_mode=distill_mode,
+        top_k=top_k,
+    )
+
+    return KDLoss(
+        student_loss=student_loss,
+        distillation_loss=distillation_loss,
+        alpha=alpha,
+    )
