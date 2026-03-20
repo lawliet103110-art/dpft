@@ -400,13 +400,15 @@ class KRadarDataset(Dataset):
 
         H, W = img_size
 
-        # Initialize output channels
+        # Initialize output channels.
+        # Height channels (bev_z_max / bev_z_min) are pre-filled with z_min so
+        # that empty pixels normalize to exactly 0 after scale_lidar_data.
         bev_intensity_max = np.zeros((H, W), dtype=np.float32)
-        bev_intensity_median = np.zeros((H, W), dtype=np.float32)
-        bev_intensity_var = np.zeros((H, W), dtype=np.float32)
+        bev_z_max = np.full((H, W), lidar_info.z_min, dtype=np.float32)
+        bev_z_min = np.full((H, W), lidar_info.z_min, dtype=np.float32)
         bev_range_max = np.zeros((H, W), dtype=np.float32)
-        bev_range_median = np.zeros((H, W), dtype=np.float32)
-        bev_range_var = np.zeros((H, W), dtype=np.float32)
+        bev_count = np.zeros((H, W), dtype=np.float32)
+        bev_z_span = np.zeros((H, W), dtype=np.float32)
 
         # Extract point cloud coordinates and attributes
         x, y, z = point_cloud[:, 0], point_cloud[:, 1], point_cloud[:, 2]
@@ -427,27 +429,6 @@ class KRadarDataset(Dataset):
         x_img = np.clip(x_img, 0, H - 1)
         y_img = np.clip(y_img, 0, W - 1)
 
-        # # Aggregate points per pixel using dictionaries
-        # from collections import defaultdict
-        # pixel_points = defaultdict(lambda: {'intensity': [], 'range': []})
-
-        # for i in range(len(x_img)):
-        #     pixel_points[(x_img[i], y_img[i])]['intensity'].append(intensity[i])
-        #     pixel_points[(x_img[i], y_img[i])]['range'].append(range_vals[i])
-
-        # # Compute statistical features
-        # for (px, py), values in pixel_points.items():
-        #     intensities = np.array(values['intensity'])
-        #     ranges = np.array(values['range'])
-
-        #     bev_intensity_max[px, py] = np.max(intensities)
-        #     bev_intensity_median[px, py] = np.median(intensities)
-        #     bev_intensity_var[px, py] = np.var(intensities)
-
-        #     bev_range_max[px, py] = np.max(ranges)
-        #     bev_range_median[px, py] = np.median(ranges)
-        #     bev_range_var[px, py] = np.var(ranges)
-
         # Vectorized aggregation using numpy (like radar processing)
         # Convert 2D pixel coords to 1D indices for binning
         pixel_indices = x_img * W + y_img
@@ -455,30 +436,35 @@ class KRadarDataset(Dataset):
         # Get unique pixels and their point indices
         unique_pixels, inverse_indices = np.unique(pixel_indices, return_inverse=True)
 
-        # Aggregate statistics for each unique pixel (vectorized)
+        # Aggregate statistics for each unique pixel
         for i, pixel_idx in enumerate(unique_pixels):
             # Get all points belonging to this pixel
-            mask = (inverse_indices == i)
-            pixel_intensities = intensity[mask]
-            pixel_ranges = range_vals[mask]
+            px_mask = (inverse_indices == i)
+            pixel_z = z[px_mask]
+            pixel_intensities = intensity[px_mask]
+            pixel_ranges = range_vals[px_mask]
 
             # Convert 1D pixel index back to 2D coords
             px = pixel_idx // W
             py = pixel_idx % W
 
-            # Compute statistics (like radar: np.max, np.median, np.var)
             bev_intensity_max[px, py] = np.max(pixel_intensities)
-            bev_intensity_median[px, py] = np.median(pixel_intensities)
-            bev_intensity_var[px, py] = np.var(pixel_intensities)
-
+            bev_z_max[px, py] = np.max(pixel_z)
+            bev_z_min[px, py] = np.min(pixel_z)
             bev_range_max[px, py] = np.max(pixel_ranges)
-            bev_range_median[px, py] = np.median(pixel_ranges)
-            bev_range_var[px, py] = np.var(pixel_ranges)
+            bev_count[px, py] = len(pixel_z)
+            bev_z_span[px, py] = np.max(pixel_z) - np.min(pixel_z)
 
-        # Stack channels (H, W, 6)
+        # Stack channels (H, W, 6):
+        #   0 intensity_max  – reflectivity of the brightest return
+        #   1 z_max          – highest point in the pixel (key for vehicle height)
+        #   2 z_min          – lowest point in the pixel
+        #   3 range_max      – distance of the farthest return (mm)
+        #   4 count          – number of LiDAR returns per pixel (density)
+        #   5 z_span         – height extent (z_max − z_min) of the pixel column
         bev_image = np.dstack((
-            bev_intensity_max, bev_intensity_median, bev_intensity_var,
-            bev_range_max, bev_range_median, bev_range_var
+            bev_intensity_max, bev_z_max, bev_z_min,
+            bev_range_max, bev_count, bev_z_span
         ))
 
         # Convert to torch tensor
@@ -925,21 +911,51 @@ class KRadarDataset(Dataset):
                 items to thier scaled data tensors.
         """
         for k, v in sample.items():
-            if k in ['lidar_top', 'lidar_side']:
-                # LiDAR BEV/Side projection image has 6 channels
-                # First 3 channels: intensity features (max, median, var)
-                # Last 3 channels: range features (max, median, var)
+            if k == 'lidar_top':
+                # Channel layout for lidar_top BEV (see project_lidar_to_bev):
+                #   0  intensity_max  – normalize with OS1 intensity range
+                #   1  z_max          – normalize with z height range
+                #   2  z_min          – normalize with z height range
+                #   3  range_max      – normalize with detection range in mm
+                #   4  count          – normalize by max expected points per pixel
+                #   5  z_span         – normalize with full z height span
 
-                # Intensity channels normalization using fixed range (like radar)
-                intensity_channels = v[:, :, :3]
+                # Channel 0: intensity_max
+                ch0 = (v[..., 0:1] - lidar_info.min_intensity) \
+                    / (lidar_info.max_intensity - lidar_info.min_intensity) * 255
+                ch0 = torch.clip(ch0, 0, 255)
+
+                # Channels 1–2: z_max and z_min
+                # Empty pixels are initialized to z_min, so they map to 0.
+                ch12 = (v[..., 1:3] - lidar_info.z_min) / lidar_info.z_range_norm * 255
+                ch12 = torch.clip(ch12, 0, 255)
+
+                # Channel 3: range_max
+                ch3 = (v[..., 3:4] - lidar_info.min_range) \
+                    / (lidar_info.max_range_norm - lidar_info.min_range) * 255
+                ch3 = torch.clip(ch3, 0, 255)
+
+                # Channel 4: point count
+                ch4 = v[..., 4:5] / lidar_info.max_count_per_pixel * 255
+                ch4 = torch.clip(ch4, 0, 255)
+
+                # Channel 5: z_span
+                ch5 = v[..., 5:6] / lidar_info.z_range_norm * 255
+                ch5 = torch.clip(ch5, 0, 255)
+
+                sample[k] = torch.cat([ch0, ch12, ch3, ch4, ch5], dim=-1)
+
+            elif k == 'lidar_side':
+                # lidar_side uses the old intensity/range layout (not used by
+                # the model, kept for consistency with project_lidar_to_side).
+                intensity_channels = v[..., :3]
                 intensity_scaled = \
                     (intensity_channels - lidar_info.min_intensity) \
                     / (lidar_info.max_intensity - lidar_info.min_intensity) \
                     * (255 - 0) + 0
                 intensity_scaled = torch.clip(intensity_scaled, 0, 255)
 
-                # Range channels normalization using fixed range
-                range_channels = v[:, :, 3:]
+                range_channels = v[..., 3:]
                 range_scaled = \
                     (range_channels - lidar_info.min_range) \
                     / (lidar_info.max_range_norm - lidar_info.min_range) \

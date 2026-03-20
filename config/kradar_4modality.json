@@ -13,7 +13,7 @@
     "camera": "M",
     "radar": "BF",
     "lidar": 1,
-    "lidar_dropout": 0.0,
+    "lidar_dropout": 0.3,
     "image_size": 512,
     "num_classes": 2,
     "categories": {
@@ -37,7 +37,7 @@
   "train": {
     "batch_size": 4,
     "shuffle": true,
-    "epochs": 200,
+    "epochs": 400,
     "logging": "epoch",
     "optimizer": {
       "name": "AdamW",
@@ -65,8 +65,8 @@
       "angle": 1.0
     },
     "scheduler": {
-      "name": "ConstantLR",
-      "factor": 1.0
+      "name": "CosineAnnealingLR",
+      "T_max": 400
     }
   },
 

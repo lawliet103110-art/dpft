@@ -103,3 +103,13 @@ side_height = 64  # pixels (Z-axis resolution)
 # Z-axis filtering for BEV projection
 z_min = -5  # meters
 z_max = 10  # meters
+
+# Normalization constants for height-based BEV channels
+# z_range_norm: full span from z_min to z_max (10 - (-5) = 15 m)
+# Empty BEV pixels are initialized to z_min, so they normalize to exactly 0.
+z_range_norm = 15.0          # meters  (z_max - z_min)
+
+# max_count_per_pixel: clip value for the point-density channel.
+# On a 256×256 BEV over 80 m × 120 m the OS1-128 delivers roughly 1 pt/px on
+# average; a hard clip at 20 captures >99 % of pixels without saturation.
+max_count_per_pixel = 20.0   # points
