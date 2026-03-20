@@ -77,8 +77,11 @@ max_range = 120.0  # meters
 # Y-axis: left/right direction (meters)
 
 # Selected range based on data analysis
-x_range_default = (0, 80)  # meters
-y_range_default = (-20,20)  # meters
+# x_range_default = (-5, 100)  # meters
+# y_range_default = (-20,20)  # meters
+# z_range_default = (-5, 10)  # meters
+x_range_default = (-10, 100)  # meters
+y_range_default = (-40, 40)  # meters
 z_range_default = (-5, 10)  # meters
 
 # Intensity normalization range (from OS1-128 data statistics)
