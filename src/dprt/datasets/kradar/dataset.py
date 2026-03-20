@@ -293,13 +293,18 @@ class KRadarDataset(Dataset):
         if self.lidar > 0 and 'label_to_lidar_top' in sample:
             sample['label_to_lidar_top_t'] = sample.pop('label_to_lidar_top')
         elif self.lidar > 0 and 'lidar_top' in sample:
-            # Create identity transformation matrix if not loaded from file
-            sample['label_to_lidar_top_t'] = torch.eye(4).type(getattr(torch, self.dtype))
+            # Use zero matrix so get_reference_points skips the spherical
+            # conversion and forwards Cartesian query coordinates directly to
+            # the Cartesian BEV projection matrix P.  An identity matrix would
+            # cause any() == True, triggering cart→spher conversion before P,
+            # which maps (r, phi, roh) instead of (x, y, z) — a projection bug.
+            sample['label_to_lidar_top_t'] = torch.zeros(
+                (4, 4), dtype=getattr(torch, self.dtype))
 
         if self.lidar > 0 and 'lidar_side' in sample:
-            # Side view uses same transformation as top view
-            sample['label_to_lidar_side_t'] = sample.get('label_to_lidar_top_t',
-                                                          torch.eye(4).type(getattr(torch, self.dtype)))
+            # Side view also uses Cartesian projection; keep zeros for consistency.
+            sample['label_to_lidar_side_t'] = torch.zeros(
+                (4, 4), dtype=getattr(torch, self.dtype))
 
         return sample
 

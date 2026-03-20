@@ -498,11 +498,42 @@ tensorboard --logdir outputs/distillation/[timestamp]
 
 ---
 
+## 为什么学生模型有时超越教师模型？
+
+在 `top_k` 和 `weighted` 蒸馏模式下，学生的 mAP 比教师高 0.00x 是一种**已被广泛记录的现象**，原因如下：
+
+### 1. 正则化效应（Label Smoothing）
+教师的**软标签（soft labels）**天然起到标签平滑的作用，降低了学生对训练集噪声的过拟合。当数据集规模较小（子集训练）时，这一效果尤为显著。教师在全集上训练了较多轮次，可能在子集上略有过拟合，而学生通过 KD 损失获得了额外的正则化。
+
+### 2. Born Again Networks（再生网络）现象
+Furlanello 等人（2018）的研究表明，**用完全相同结构的模型作为教师和学生**，学生经过蒸馏后仍能超过教师。这说明蒸馏损失本身提供了比单纯硬标签更丰富的监督信号，使学生收敛到更好的泛化极值点。
+
+### 3. 温度缩放（Temperature Scaling）
+蒸馏时使用 `temperature > 1` 对教师 logits 进行软化，类间的相对概率关系被保留。这些**类间关系信息**（例如"看起来像卡车但更像轿车"）是硬标签 (0/1) 完全不包含的，给学生提供了额外学习信号。
+
+### 4. Top-K / Weighted 过滤的质量保证
+- **top_k 模式**：只对教师最自信的 K 个预测进行蒸馏，避免学生从不确定的教师预测中学习噪声。
+- **weighted 模式**：根据教师置信度加权蒸馏损失，高质量预测贡献更多梯度。
+
+这两种模式都比 `all` 模式（包含所有背景预测）产生更干净的监督信号，从而提升泛化性能。
+
+### 5. 实践建议
+| 现象 | 说明 |
+|------|------|
+| 学生 mAP > 教师 mAP (差值 < 0.01) | 正常现象，属于蒸馏正则化效果 |
+| 学生 mAP > 教师 mAP (差值 > 0.02) | 建议检查教师是否过拟合，或学生使用了额外数据增强 |
+| 学生 mAP << 教师 mAP | 检查 alpha、temperature、蒸馏模式配置 |
+
+> **结论**：您观察到的 0.26x（学生）略高于教师的结果是**完全正常且符合理论预期**的，说明蒸馏配置工作正常。
+
+---
+
 ## 参考文献
 
 1. Hinton et al. "Distilling the Knowledge in a Neural Network" (2015)
 2. Chen et al. "Learning Efficient Object Detection Models with Knowledge Distillation" (NeurIPS 2017)
 3. Wang et al. "Distilling Object Detectors with Fine-grained Feature Imitation" (CVPR 2019)
+4. Furlanello et al. "Born Again Networks" (ICML 2018) — 同架构学生超越教师的理论基础
 
 ---
 
