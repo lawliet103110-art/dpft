@@ -121,4 +121,8 @@ side_height = 64  # pixels (Z-axis resolution, smaller to save computation)
 # Z-axis filtering for BEV projection
 # Only keep points within certain height range (based on 1-99 percentile)
 z_min = -5  # meters
-z_max = 10 # meters
+z_max = 10  # meters
+
+# BEV channel normalization constants
+z_range_norm = 15.0          # z_max - z_min = 10 - (-5) = 15 meters
+max_count_per_pixel = 20.0   # maximum expected points per BEV pixel
