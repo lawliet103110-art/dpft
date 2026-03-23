@@ -36,8 +36,14 @@ def test_matched_mode_uses_teacher_indices_aligned_to_gt():
         teacher_outputs,
         indices=(student_pred_indices, gt_indices, teacher_pred_indices),
     )
+    fallback_total_loss, _ = loss_fn(
+        student_outputs,
+        teacher_outputs,
+        indices=(student_pred_indices, gt_indices),
+    )
 
     assert 'distill_class' in losses
+    assert fallback_total_loss > 0
     assert torch.isclose(total_loss, torch.tensor(0.0), atol=1e-6)
 
 

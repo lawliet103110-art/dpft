@@ -922,12 +922,15 @@ class KDLoss(nn.modules.loss._Loss):
                     teacher_gt_idx = teacher_gt_idx[0]
 
                     # Align teacher indices to student GT order to ensure GT-aligned distillation
+                    teacher_pred_idx_list = teacher_pred_idx.detach().cpu().tolist()
+                    teacher_gt_idx_list = teacher_gt_idx.detach().cpu().tolist()
+                    student_gt_idx_list = student_gt_idx.detach().cpu().tolist()
+
                     teacher_idx_by_gt = {
-                        int(gt.item()): int(pred.item())
-                        for pred, gt in zip(teacher_pred_idx, teacher_gt_idx)
+                        gt: pred for pred, gt in zip(teacher_pred_idx_list, teacher_gt_idx_list)
                     }
                     common_positions = [
-                        pos for pos, gt in enumerate(student_gt_idx.tolist()) if gt in teacher_idx_by_gt
+                        pos for pos, gt in enumerate(student_gt_idx_list) if gt in teacher_idx_by_gt
                     ]
 
                     if common_positions:
