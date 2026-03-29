@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def test_teacher_checkpoint_guard_exists_in_train_main() -> None:
-    train_file = Path("/home/runner/work/dpft/dpft/src/dprt/train.py")
+    train_file = Path(__file__).resolve().parent / "src" / "dprt" / "train.py"
     content = train_file.read_text(encoding="utf-8")
 
     # Guard condition: detect accidental use of teacher checkpoint as resume checkpoint.
