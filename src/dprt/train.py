@@ -1,6 +1,7 @@
 import argparse
 import datetime
 import os.path as osp
+import warnings
 
 from dprt.datasets import init as init_dataset
 from dprt.datasets import load as load_dataset
@@ -45,7 +46,22 @@ def main(src: str, cfg: str, dst: str, checkpoint: str = None):
 
     # Build model
     if checkpoint is not None:
-        model, epoch, timestamp = load_model(checkpoint)
+        distill_cfg = config.get('train', {}).get('distillation', {})
+        teacher_checkpoint = distill_cfg.get('teacher_checkpoint')
+
+        # Guard rail: when users accidentally pass teacher checkpoint to --checkpoint
+        # we should not resume student training from teacher epoch.
+        if teacher_checkpoint is not None and osp.abspath(checkpoint) == osp.abspath(teacher_checkpoint):
+            warnings.warn(
+                "Detected --checkpoint equals train.distillation.teacher_checkpoint. "
+                "Treating it as teacher-only checkpoint and starting student training from epoch 0. "
+                "To resume student training, pass a student checkpoint path to --checkpoint.",
+                RuntimeWarning
+            )
+            model = build_model(config['model']['name'], config)
+            epoch = 0
+        else:
+            model, epoch, timestamp = load_model(checkpoint)
     else:
         model = build_model(config['model']['name'], config)
 
