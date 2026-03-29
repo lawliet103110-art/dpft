@@ -1,0 +1,259 @@
+{
+    "dataset": "kradar",
+    "_comment": "蒸馏消融实验: only cls KD (仅分类蒸馏)",
+    "computing": {
+        "dtype": "float32",
+        "seed": 42,
+        "workers": 16,
+        "device": "cuda"
+    },
+    "data": {
+        "revision": "v2",
+        "image_size": 512,
+        "num_classes": 2,
+        "categories": {
+            "Sedan": 0,
+            "Bus or Truck": -1,
+            "Motorcycle": -1,
+            "Bicycle": -1,
+            "Bicycle Group": -1,
+            "Pedestrian": -1,
+            "Pedestrian Group": -1,
+            "Background": -1
+        },
+        "fov": {
+            "x": [
+                0.0,
+                72.0
+            ],
+            "y": [
+                -6.4,
+                6.4
+            ],
+            "z": [
+                -2.0,
+                6.0
+            ],
+            "azimuth": [
+                -50,
+                50
+            ]
+        }
+    },
+    "train": {
+        "batch_size": 4,
+        "shuffle": true,
+        "epochs": 150,
+        "_comment_epochs": "蒸馏训练通常收敛更快",
+        "logging": "epoch",
+        "distillation": {
+            "teacher_checkpoint": "path/to/your/teacher_model.pt",
+            "freeze_teacher": true,
+            "temperature": 4.0,
+            "alpha": 0.5,
+            "distill_mode": "top_k",
+            "_comment_distill_mode": "'top_k'=只蒸馏教师置信度最高的K个预测框，有效过滤背景噪声",
+            "top_k": 50,
+            "_comment_top_k": "蒸馏教师置信度最高的50个预测框（约占全部400个queries的12.5%）",
+            "distill_class": true,
+            "distill_bbox": false,
+            "_comment_ablation": "Ablation: 仅保留分类蒸馏，关闭bbox蒸馏"
+        },
+        "optimizer": {
+            "name": "AdamW",
+            "lr": 0.00015
+        },
+        "anassigner": "HungarianAnassigner",
+        "criterion": "SetCriterion",
+        "losses": {
+            "class": "FocalLoss",
+            "center": "L1Loss",
+            "size": "L1Loss",
+            "angle": "L1Loss"
+        },
+        "loss_inputs": {
+            "class": [
+                "class"
+            ],
+            "center": [
+                "center"
+            ],
+            "size": [
+                "size"
+            ],
+            "angle": [
+                "angle"
+            ]
+        },
+        "loss_weights": {
+            "total_class": 1.0,
+            "object_class": 0.0,
+            "center": 1.0,
+            "size": 1.0,
+            "angle": 1.0
+        },
+        "scheduler": {
+            "name": "ConstantLR",
+            "factor": 1.0
+        }
+    },
+    "model": {
+        "name": "dprt",
+        "_comment_model": "学生模型 - 与教师保持几乎相同的架构，只做轻微压缩",
+        "inputs": [
+            "camera_mono",
+            "radar_bev",
+            "radar_front"
+        ],
+        "skiplinks": {
+            "camera_mono": true,
+            "radar_bev": true,
+            "radar_front": true
+        },
+        "backbones": {
+            "camera_mono": {
+                "name": "ResNet101",
+                "_comment": "保持不变 - 与教师相同",
+                "weights": "IMAGENET1K_V2",
+                "multi_scale": 4,
+                "norm_layer": "BatchNorm2d"
+            },
+            "radar_bev": {
+                "name": "ResNet50",
+                "_comment": "保持不变 - 与教师相同",
+                "weights": "IMAGENET1K_V2",
+                "in_channels": 6,
+                "multi_scale": 4,
+                "norm_layer": "BatchNorm2d"
+            },
+            "radar_front": {
+                "name": "ResNet50",
+                "_comment": "保持不变 - 与教师相同",
+                "weights": "IMAGENET1K_V2",
+                "in_channels": 6,
+                "multi_scale": 4,
+                "norm_layer": "BatchNorm2d"
+            }
+        },
+        "necks": {
+            "camera_mono": {
+                "name": "FPN",
+                "in_channels_list": [
+                    3,
+                    256,
+                    512,
+                    1024,
+                    2048
+                ],
+                "out_channels": 16
+            },
+            "radar_bev": {
+                "name": "FPN",
+                "in_channels_list": [
+                    6,
+                    256,
+                    512,
+                    1024,
+                    2048
+                ],
+                "out_channels": 16
+            },
+            "radar_front": {
+                "name": "FPN",
+                "in_channels_list": [
+                    6,
+                    256,
+                    512,
+                    1024,
+                    2048
+                ],
+                "out_channels": 16
+            }
+        },
+        "embeddings": {
+            "camera_mono": {
+                "name": "sinusoidal_embedding",
+                "num_feats": 16,
+                "n_levels": 5,
+                "normalize": true
+            },
+            "radar_bev": {
+                "name": "sinusoidal_embedding",
+                "num_feats": 16,
+                "n_levels": 5,
+                "normalize": true
+            },
+            "radar_front": {
+                "name": "sinusoidal_embedding",
+                "num_feats": 16,
+                "n_levels": 5,
+                "normalize": true
+            }
+        },
+        "querent": {
+            "name": "data_agnostic_static_querent",
+            "transformation": "spher2cart",
+            "resolution": [
+                20,
+                20,
+                1
+            ],
+            "_comment_resolution": "保持400个queries - 与教师相同",
+            "minimum": [
+                4,
+                -50,
+                0
+            ],
+            "maximum": [
+                72,
+                50,
+                0
+            ]
+        },
+        "fuser": {
+            "name": "IMPFusion",
+            "i_iter": 3,
+            "_comment_i_iter": "从4降到3 - 唯一的主要修改，可节省25%计算",
+            "m_views": 3,
+            "d_model": 16,
+            "d_ffn": 32,
+            "n_queries": 400,
+            "n_levels": [
+                5,
+                5,
+                5
+            ],
+            "n_heads": [
+                8,
+                8,
+                8
+            ],
+            "n_points": [
+                4,
+                4,
+                4
+            ],
+            "norm": true,
+            "dropout": 0.1,
+            "reduction": "linear",
+            "activation": "Mish"
+        },
+        "head": {
+            "name": "linear_detection_head",
+            "in_channels": 16,
+            "num_classes": 2,
+            "num_reg_layers": 3,
+            "num_cls_layers": 3
+        }
+    },
+    "evaluate": {
+        "logging": "epoch",
+        "metrics": {
+            "mAP": "mAP3D",
+            "mGIoU": "mGIoU3D"
+        },
+        "exporter": {
+            "name": "kradar"
+        }
+    }
+}
