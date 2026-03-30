@@ -867,7 +867,6 @@ class DistillationLoss(nn.modules.loss._Loss):
 
             elif self.distill_mode == 'weighted':
                 # Distill all shared queries, weighted by teacher confidence
-                N_distill = min(N_student, N_teacher)
                 student_class = student_outputs['class'][:, :N_distill]
                 teacher_class = teacher_outputs['class'][:, :N_distill]
                 weights = teacher_conf[:, :N_distill]  # (B, N_distill)
@@ -877,7 +876,6 @@ class DistillationLoss(nn.modules.loss._Loss):
 
             else:
                 # 'all' mode: distill min(N_student, N_teacher) queries
-                N_distill = min(N_student, N_teacher)
                 student_class = student_outputs['class'][:, :N_distill]
                 teacher_class = teacher_outputs['class'][:, :N_distill]
 
@@ -938,7 +936,6 @@ class DistillationLoss(nn.modules.loss._Loss):
 
                 elif self.distill_mode == 'weighted':
                     # Distill all shared queries, weighted by teacher confidence
-                    N_distill = min(N_student, N_teacher)
                     student_bbox = torch.cat([student_outputs[k][:, :N_distill] for k in bbox_keys], dim=-1)
                     teacher_bbox = torch.cat([teacher_outputs[k][:, :N_distill] for k in bbox_keys], dim=-1)
                     weights = teacher_conf[:, :N_distill]  # (B, N_distill)
@@ -948,7 +945,6 @@ class DistillationLoss(nn.modules.loss._Loss):
 
                 else:
                     # 'all' mode: distill min(N_student, N_teacher) queries
-                    N_distill = min(N_student, N_teacher)
                     student_bbox = torch.cat([student_outputs[k][:, :N_distill] for k in bbox_keys], dim=-1)
                     teacher_bbox = torch.cat([teacher_outputs[k][:, :N_distill] for k in bbox_keys], dim=-1)
 
