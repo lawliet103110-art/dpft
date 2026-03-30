@@ -743,6 +743,8 @@ class DistillationLoss(nn.modules.loss._Loss):
         B, N_student = student_outputs['class'].shape[:2]
         N_teacher = teacher_outputs['class'].shape[1]
         device = student_outputs['class'].device
+        N_distill = min(N_student, N_teacher)
+        topk_equivalent_all = False
 
         # Handle different distillation modes
         if self.distill_mode == 'matched' and indices is not None:
@@ -791,20 +793,25 @@ class DistillationLoss(nn.modules.loss._Loss):
             student_selected = None
             teacher_selected = None
 
-            # Compute teacher confidence: max class probability after softmax
-            teacher_conf = F.softmax(teacher_outputs['class'], dim=-1).max(dim=-1).values  # (B, N_teacher)
-
             # effective_k: honour the requested top_k but cap at the smaller query
             # count so gather indices are always valid for both models.
-            effective_k = min(self.top_k, N_teacher, N_student)
-            # topk returns (values, indices); we only need the indices
-            teacher_topk_indices = teacher_conf.topk(effective_k, dim=-1).indices  # (B, effective_k)
-            # Map teacher top-K indices to student query space.
-            # NOTE: this assumes that query positions are roughly aligned between
-            # teacher and student (i.e. both models use the same static query grid).
-            # If the student has fewer queries, higher-index teacher queries are
-            # clamped to the last student query slot.
-            student_topk_indices = torch.clamp(teacher_topk_indices, 0, N_student - 1)  # (B, effective_k)
+            effective_k = min(self.top_k, N_distill)
+            if effective_k == N_distill:
+                # When top_k covers all shared queries, make top_k numerically
+                # equivalent to 'all' mode by using direct slicing. This avoids
+                # confidence ranking and keeps training behavior deterministic.
+                topk_equivalent_all = True
+            else:
+                # Compute teacher confidence: max class probability after softmax
+                teacher_conf = F.softmax(teacher_outputs['class'], dim=-1).max(dim=-1).values  # (B, N_teacher)
+                # topk returns (values, indices); we only need the indices
+                teacher_topk_indices = teacher_conf.topk(effective_k, dim=-1).indices  # (B, effective_k)
+                # Map teacher top-K indices to student query space.
+                # NOTE: this assumes that query positions are roughly aligned between
+                # teacher and student (i.e. both models use the same static query grid).
+                # If the student has fewer queries, higher-index teacher queries are
+                # clamped to the last student query slot.
+                student_topk_indices = torch.clamp(teacher_topk_indices, 0, N_student - 1)  # (B, effective_k)
 
         elif self.distill_mode == 'weighted':
             # Weighted mode: Distill all queries but scale each query's loss by
@@ -841,15 +848,19 @@ class DistillationLoss(nn.modules.loss._Loss):
                     losses['distill_class'] = class_loss
 
             elif self.distill_mode == 'top_k':
-                # Gather teacher top-K logits and the corresponding student logits.
-                # teacher_topk_indices / student_topk_indices are pre-computed in
-                # the mode-selection block above.
-                teacher_class = teacher_outputs['class'].gather(
-                    1, teacher_topk_indices.unsqueeze(-1).expand(-1, -1, teacher_outputs['class'].shape[-1])
-                )  # (B, effective_k, num_classes)
-                student_class = student_outputs['class'].gather(
-                    1, student_topk_indices.unsqueeze(-1).expand(-1, -1, student_outputs['class'].shape[-1])
-                )  # (B, effective_k, num_classes)
+                if topk_equivalent_all:
+                    student_class = student_outputs['class'][:, :N_distill]
+                    teacher_class = teacher_outputs['class'][:, :N_distill]
+                else:
+                    # Gather teacher top-K logits and the corresponding student logits.
+                    # teacher_topk_indices / student_topk_indices are pre-computed in
+                    # the mode-selection block above.
+                    teacher_class = teacher_outputs['class'].gather(
+                        1, teacher_topk_indices.unsqueeze(-1).expand(-1, -1, teacher_outputs['class'].shape[-1])
+                    )  # (B, effective_k, num_classes)
+                    student_class = student_outputs['class'].gather(
+                        1, student_topk_indices.unsqueeze(-1).expand(-1, -1, student_outputs['class'].shape[-1])
+                    )  # (B, effective_k, num_classes)
 
                 class_loss = self.distillation_loss_class(student_class, teacher_class)
                 losses['distill_class'] = class_loss
@@ -899,24 +910,28 @@ class DistillationLoss(nn.modules.loss._Loss):
                         losses['distill_bbox'] = bbox_loss
 
                 elif self.distill_mode == 'top_k':
-                    # Gather teacher top-K bbox predictions and the corresponding
-                    # student predictions using the indices pre-computed above.
-                    teacher_bbox_parts = []
-                    student_bbox_parts = []
-                    for bk in bbox_keys:
-                        feat_dim = teacher_outputs[bk].shape[-1]
-                        teacher_bbox_parts.append(
-                            teacher_outputs[bk].gather(
-                                1, teacher_topk_indices.unsqueeze(-1).expand(-1, -1, feat_dim)
+                    if topk_equivalent_all:
+                        teacher_bbox = torch.cat([teacher_outputs[k][:, :N_distill] for k in bbox_keys], dim=-1)
+                        student_bbox = torch.cat([student_outputs[k][:, :N_distill] for k in bbox_keys], dim=-1)
+                    else:
+                        # Gather teacher top-K bbox predictions and the corresponding
+                        # student predictions using the indices pre-computed above.
+                        teacher_bbox_parts = []
+                        student_bbox_parts = []
+                        for bk in bbox_keys:
+                            feat_dim = teacher_outputs[bk].shape[-1]
+                            teacher_bbox_parts.append(
+                                teacher_outputs[bk].gather(
+                                    1, teacher_topk_indices.unsqueeze(-1).expand(-1, -1, feat_dim)
+                                )
                             )
-                        )
-                        student_bbox_parts.append(
-                            student_outputs[bk].gather(
-                                1, student_topk_indices.unsqueeze(-1).expand(-1, -1, feat_dim)
+                            student_bbox_parts.append(
+                                student_outputs[bk].gather(
+                                    1, student_topk_indices.unsqueeze(-1).expand(-1, -1, feat_dim)
+                                )
                             )
-                        )
-                    teacher_bbox = torch.cat(teacher_bbox_parts, dim=-1)  # (B, effective_k, 8)
-                    student_bbox = torch.cat(student_bbox_parts, dim=-1)
+                        teacher_bbox = torch.cat(teacher_bbox_parts, dim=-1)  # (B, effective_k, 8)
+                        student_bbox = torch.cat(student_bbox_parts, dim=-1)
 
                     bbox_loss = self.distillation_loss_bbox(student_bbox, teacher_bbox)
                     losses['distill_bbox'] = bbox_loss
