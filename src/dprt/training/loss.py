@@ -709,7 +709,7 @@ class DistillationLoss(nn.modules.loss._Loss):
     def forward(self,
                 student_outputs: Dict[str, torch.Tensor],
                 teacher_outputs: Dict[str, torch.Tensor],
-                indices: Tuple[torch.Tensor, torch.Tensor] = None) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+                indices: Tuple[torch.Tensor, ...] = None) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """Compute distillation loss between student and teacher outputs.
 
         Arguments:
@@ -720,9 +720,11 @@ class DistillationLoss(nn.modules.loss._Loss):
                 - 'angle': Angle predictions (B, N_student, 2) as (sin, cos)
             teacher_outputs: Dictionary containing teacher model outputs with same structure
                 - Note: N_teacher can be different from N_student
-            indices: Optional tuple (pred_indices, gt_indices) from Hungarian matching.
+            indices: Optional tuple from Hungarian matching.
                 Required when distill_mode='matched'. Shape: (B, M) where M is number of GT boxes.
-                Note: pred_indices are from student model predictions
+                Supported formats:
+                - (student_pred_indices, gt_indices)
+                - (student_pred_indices, gt_indices, teacher_pred_indices)
 
         Returns:
             total_loss: Total distillation loss
@@ -745,8 +747,11 @@ class DistillationLoss(nn.modules.loss._Loss):
         # Handle different distillation modes
         if self.distill_mode == 'matched' and indices is not None:
             # Matched mode: Only distill queries matched to GT boxes
-            # Strategy: Use the same GT matching indices for both student and teacher
-            pred_indices, gt_indices = indices
+            if len(indices) == 3:
+                student_pred_indices, gt_indices, teacher_pred_indices = indices
+            else:
+                student_pred_indices, gt_indices = indices
+                teacher_pred_indices = None
 
             # For each sample in batch, select matched student and teacher queries
             student_selected = []
@@ -754,15 +759,15 @@ class DistillationLoss(nn.modules.loss._Loss):
 
             for b in range(B):
                 # Get matched indices for this sample
-                student_matched_idx = pred_indices[b]  # Indices of matched student queries
+                student_matched_idx = student_pred_indices[b]  # Indices of matched student queries
 
                 if len(student_matched_idx) > 0:
-                    # For teacher, we use the top N_student queries (assuming they are sorted by confidence)
-                    # Then select the same matched indices as student
-                    # This ensures we compare corresponding queries
-
-                    # Clamp student indices to be within teacher's range
-                    teacher_matched_idx = torch.clamp(student_matched_idx, 0, N_teacher - 1)
+                    if teacher_pred_indices is not None:
+                        teacher_matched_idx = teacher_pred_indices[b]
+                    else:
+                        # Backward compatible fallback: re-use student indices
+                        # (for old call sites that only pass 2-tuple indices)
+                        teacher_matched_idx = torch.clamp(student_matched_idx, 0, N_teacher - 1)
 
                     student_selected.append(student_matched_idx)
                     teacher_selected.append(teacher_matched_idx)
@@ -1012,28 +1017,72 @@ class KDLoss(nn.modules.loss._Loss):
                 inputs_list = decollate_batch(student_outputs, detach=False, pad=False)
 
                 # Collect all indices for the batch
-                batch_pred_indices = []
+                batch_student_pred_indices = []
                 batch_gt_indices = []
+                batch_teacher_pred_indices = []
 
-                for input_dict, target in zip(inputs_list, targets):
+                for sample_idx, (input_dict, target) in enumerate(zip(inputs_list, targets)):
                     # Skip if no targets
                     if not all([t.numel() for t in target.values()]):
                         # Empty target - add empty indices
-                        batch_pred_indices.append(torch.tensor([], dtype=torch.long, device=input_dict['class'].device))
+                        empty_idx = torch.tensor([], dtype=torch.long, device=input_dict['class'].device)
+                        batch_student_pred_indices.append(empty_idx)
                         batch_gt_indices.append(torch.tensor([], dtype=torch.long, device=input_dict['class'].device))
+                        batch_teacher_pred_indices.append(empty_idx)
                         continue
 
                     # Insert dummy batch dimension for anassigner
                     input_single = {k: v.unsqueeze(0) for k, v in input_dict.items()}
                     target_single = {k: v.unsqueeze(0) for k, v in target.items()}
 
-                    # Get matching indices
-                    pred_idx, gt_idx = self.student_loss.anassigner(input_single, target_single)
-                    batch_pred_indices.append(pred_idx[0])  # Remove batch dim
-                    batch_gt_indices.append(gt_idx[0])
+                    teacher_input_single = {
+                        k: teacher_outputs[k][sample_idx].unsqueeze(0) for k in ('class', 'center', 'size', 'angle')
+                    }
+
+                    # Get matching indices for student and teacher separately
+                    student_pred_idx, student_gt_idx = self.student_loss.anassigner(input_single, target_single)
+                    teacher_pred_idx, teacher_gt_idx = self.student_loss.anassigner(teacher_input_single, target_single)
+
+                    student_pred_idx = student_pred_idx[0]
+                    student_gt_idx = student_gt_idx[0]
+                    teacher_pred_idx = teacher_pred_idx[0]
+                    teacher_gt_idx = teacher_gt_idx[0]
+
+                    # Align teacher indices to student GT order to ensure GT-aligned distillation.
+                    # Student and teacher perform Hungarian matching independently, so the query
+                    # indices for the same GT can differ between models. We realign by GT id to
+                    # build correct student-teacher query pairs for distillation.
+                    teacher_pred_idx_list = teacher_pred_idx.detach().cpu().tolist()
+                    teacher_gt_idx_list = teacher_gt_idx.detach().cpu().tolist()
+                    student_gt_idx_list = student_gt_idx.detach().cpu().tolist()
+
+                    teacher_idx_by_gt = {
+                        gt: pred for pred, gt in zip(teacher_pred_idx_list, teacher_gt_idx_list)
+                    }
+                    common_positions = [
+                        pos for pos, gt in enumerate(student_gt_idx_list) if gt in teacher_idx_by_gt
+                    ]
+
+                    if common_positions:
+                        aligned_student_pred_idx = student_pred_idx[common_positions]
+                        aligned_gt_idx = student_gt_idx[common_positions]
+                        aligned_gt_idx_list = aligned_gt_idx.detach().cpu().tolist()
+                        aligned_teacher_pred_idx = torch.tensor(
+                            [teacher_idx_by_gt[int(gt)] for gt in aligned_gt_idx_list],
+                            dtype=torch.long,
+                            device=aligned_student_pred_idx.device,
+                        )
+                    else:
+                        aligned_student_pred_idx = torch.tensor([], dtype=torch.long, device=student_pred_idx.device)
+                        aligned_gt_idx = torch.tensor([], dtype=torch.long, device=student_gt_idx.device)
+                        aligned_teacher_pred_idx = torch.tensor([], dtype=torch.long, device=teacher_pred_idx.device)
+
+                    batch_student_pred_indices.append(aligned_student_pred_idx)
+                    batch_gt_indices.append(aligned_gt_idx)
+                    batch_teacher_pred_indices.append(aligned_teacher_pred_idx)
 
                 # Stack into batch format
-                indices = (batch_pred_indices, batch_gt_indices)
+                indices = (batch_student_pred_indices, batch_gt_indices, batch_teacher_pred_indices)
             else:
                 # Fallback: warn and use 'all' mode
                 import warnings
