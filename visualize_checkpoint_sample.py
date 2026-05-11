@@ -161,6 +161,14 @@ def visualize_sample(
         plt.close(fig)
 
 
+def _get_fov(args, config) -> Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]:
+    config_fov = config.get('data', {}).get('fov', {})
+    x = args.fov_x or config_fov.get('x', [0.0, 72.0])
+    y = args.fov_y or config_fov.get('y', [-6.4, 6.4])
+    z = args.fov_z or config_fov.get('z', [-2.0, 6.0])
+    return (tuple(map(float, x)), tuple(map(float, y)), tuple(map(float, z)))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='Single-sample visualization from checkpoint')
     parser.add_argument('--src', type=str, default='/data/kradar/processed',
@@ -185,6 +193,12 @@ def main() -> None:
                         help='Apply softmax to class scores before thresholding.')
     parser.add_argument('--show', action='store_true',
                         help='Show the matplotlib window.')
+    parser.add_argument('--fov-x', type=float, nargs=2, default=None,
+                        help='Override x-axis FOV (min max).')
+    parser.add_argument('--fov-y', type=float, nargs=2, default=None,
+                        help='Override y-axis FOV (min max).')
+    parser.add_argument('--fov-z', type=float, nargs=2, default=None,
+                        help='Override z-axis FOV (min max).')
     args = parser.parse_args()
 
     config = load_config(args.cfg)
@@ -204,7 +218,7 @@ def main() -> None:
         'visualizations', f"{args.split}_sample_{args.index:06d}.png"
     )
 
-    fov = ((0.0, 72.0), (-6.4, 6.4), (-2.0, 6.0))
+    fov = _get_fov(args, config)
     visualize_sample(
         model=model,
         sample=batch,
