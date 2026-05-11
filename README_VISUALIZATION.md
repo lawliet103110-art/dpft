@@ -29,11 +29,11 @@
     --cfg /root/autodl-tmp/autodl-tmp/DPFT-main/config/kradar.json \
     --checkpoint /root/autodl-tmp/autodl-tmp/DPFT-main/result/20251126-235801-585/checkpoints/20251126-235801-585_checkpoint_0199.pt \
     --index 0 \
-    --output /root/autodl-tmp/autodl-tmp/DPFT-main/resultjsample_outputs
+    --output /root/autodl-tmp/autodl-tmp/DPFT-main/results_sample_outputs
   ```
 - **输出目录结构**:
   ```
-  resultjsample_outputs/
+  results_sample_outputs/
     test/<sequence>/<sample>/
       bev_xy.png
       xz_view.png
