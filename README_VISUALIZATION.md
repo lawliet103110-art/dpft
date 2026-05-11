@@ -19,8 +19,8 @@
   - 可扩展的分析功能
   - 支持原始数据加载（如果有）
 
-### 3. **visualize_checkpoint_sample.py** - 单样本推理可视化脚本
-- **用途**: 使用 `.pt` 模型文件对单个样本进行推理并生成 BEV 可视化图
+### 3. **visualize_checkpoint_sample.py** - 单样本推理多视图可视化脚本
+- **用途**: 使用 `.pt` 模型文件对单个样本进行推理并生成多种视图（BEV、XZ、原图叠加、雷达投影）
 - **运行**:
   ```bash
   # 实际数据示例: /root/autodl-tmp/autodl-tmp/data/kradar/test/1/00182_00150/mono.jpg
@@ -29,12 +29,23 @@
     --cfg /root/autodl-tmp/autodl-tmp/DPFT-main/config/kradar.json \
     --checkpoint /root/autodl-tmp/autodl-tmp/DPFT-main/result/20251126-235801-585/checkpoints/20251126-235801-585_checkpoint_0199.pt \
     --index 0 \
-    --output /root/autodl-tmp/autodl-tmp/DPFT-main/resultjsample_000000.png
+    --output /root/autodl-tmp/autodl-tmp/DPFT-main/resultjsample_outputs
+  ```
+- **输出目录结构**:
+  ```
+  resultjsample_outputs/
+    test/<sequence>/<sample>/
+      bev_xy.png
+      xz_view.png
+      camera_mono_overlay.png
+      radar_bev_overlay.png
+      sample_info.txt
   ```
 - **特点**:
   - 直接读取 checkpoint 推理
-  - 输出 PNG 图像文件
+  - 输出多视图 PNG 图像文件
   - 可选叠加 GT
+  - 输出 sample_info.txt 说明具体标注样本路径
 
 ### 4. **QUICKSTART.md** - 快速入门指南
 - **内容**:

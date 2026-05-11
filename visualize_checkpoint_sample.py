@@ -1,5 +1,8 @@
 """
-根据训练得到的 .pt 模型文件，对单个样本进行可视化（BEV 俯视图）。
+根据训练得到的 .pt 模型文件，对单个样本进行多视图可视化（BEV、XZ、原图叠加、雷达投影）。
+
+输出会默认生成 per-sample 文件夹，例如：
+  visualizations/<split>/<sequence>/<sample>/bev_xy.png
 
 示例:
   实际数据示例: /root/autodl-tmp/autodl-tmp/data/kradar/test/1/00182_00150/mono.jpg
@@ -8,13 +11,13 @@
     --cfg /root/autodl-tmp/autodl-tmp/DPFT-main/config/kradar.json \
     --checkpoint /root/autodl-tmp/autodl-tmp/DPFT-main/result/20251126-235801-585/checkpoints/20251126-235801-585_checkpoint_0199.pt \
     --index 0 \
-    --output /root/autodl-tmp/autodl-tmp/DPFT-main/resultjsample_000000.png
+    --output /root/autodl-tmp/autodl-tmp/DPFT-main/resultjsample_outputs
 """
 
 import argparse
 import os
 import sys
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,9 +26,11 @@ import torch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from dprt.datasets import init as init_dataset
+from dprt.datasets.kradar.utils import radar_info
 from dprt.models import load as load_model
 from dprt.utils.config import load_config
 from dprt.utils.geometry import get_box_corners
+from dprt.utils.visu import visu_2d_radar_grid
 
 
 def _select_device(device: Optional[str], config_device: str) -> torch.device:
@@ -115,13 +120,241 @@ def _draw_boxes(ax, boxes: np.ndarray, color: str, label: str) -> None:
                 label=label if i == 0 else None)
 
 
+def _draw_boxes_xz(ax, boxes: np.ndarray, color: str, label: str) -> None:
+    if boxes.size == 0:
+        return
+    corners = get_box_corners(boxes[:, :7])
+    for i, box_corners in enumerate(corners):
+        x_vals = box_corners[:, 0]
+        z_vals = box_corners[:, 2]
+        x_min, x_max = x_vals.min(), x_vals.max()
+        z_min, z_max = z_vals.min(), z_vals.max()
+        pts = np.array([
+            [x_min, z_min],
+            [x_max, z_min],
+            [x_max, z_max],
+            [x_min, z_max],
+            [x_min, z_min],
+        ])
+        ax.plot(pts[:, 0], pts[:, 1], color=color, linewidth=1.5,
+                label=label if i == 0 else None)
+
+
+def _get_sample_path(dataset, index: int) -> Dict[str, str]:
+    dataset_paths = getattr(dataset, 'dataset_paths', None)
+    if dataset_paths is None:
+        return {}
+    if isinstance(dataset_paths, list):
+        return dataset_paths[index]
+    if isinstance(dataset_paths, dict):
+        ordered_sequences = []
+        for sequence_id in sorted(dataset_paths.keys()):
+            ordered_sequences.extend(dataset_paths[sequence_id])
+        return ordered_sequences[index] if ordered_sequences else {}
+    return {}
+
+
+def _resolve_sample_dir(sample_path: Dict[str, str]) -> Optional[str]:
+    priority = [
+        'camera_mono', 'camera_stereo', 'radar_bev', 'radar_front',
+        'lidar_top', 'lidar_side', 'label', 'description',
+    ]
+    for key in priority:
+        path = sample_path.get(key)
+        if path:
+            return os.path.dirname(path)
+    return None
+
+
+def _build_output_dir(args, sample_dir: Optional[str], split: str, index: int) -> str:
+    output_root = args.output_dir or args.output or 'visualizations'
+    if args.output and os.path.splitext(args.output)[1]:
+        output_root = os.path.dirname(args.output) or '.'
+    if sample_dir:
+        sample_name = os.path.basename(sample_dir)
+        sequence = os.path.basename(os.path.dirname(sample_dir))
+        return os.path.join(output_root, split, sequence, sample_name)
+    return os.path.join(output_root, split, f"index_{index:06d}")
+
+
+def _write_sample_info(output_dir: str, split: str, index: int,
+                       sample_dir: Optional[str], sample_path: Dict[str, str]) -> None:
+    info_path = os.path.join(output_dir, 'sample_info.txt')
+    lines = [
+        f"split: {split}",
+        f"index: {index}",
+        f"sample_dir: {sample_dir or 'unknown'}",
+        "",
+        "sample_files:",
+    ]
+    for key in sorted(sample_path.keys()):
+        lines.append(f"  {key}: {sample_path[key]}")
+    with open(info_path, 'w', encoding='utf-8') as f:
+        f.write("\n".join(lines))
+    print(f"📄 已保存样本信息: {info_path}")
+
+
+def _project_points(points: np.ndarray, projection: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    projection = projection[:3, :] if projection.shape == (4, 4) else projection
+    points_h = np.hstack([points, np.ones((points.shape[0], 1))])
+    projected = (projection @ points_h.T).T
+    depth = projected[:, 2]
+    valid = depth > 1e-6
+    projected = projected[valid]
+    pixels = np.column_stack([projected[:, 0] / projected[:, 2],
+                              projected[:, 1] / projected[:, 2]])
+    return pixels, valid
+
+
+def _draw_projected_boxes(ax, boxes: np.ndarray, projection: np.ndarray,
+                          color: str, label: str) -> None:
+    if boxes.size == 0:
+        return
+    corners = get_box_corners(boxes[:, :7])
+    flat = corners.reshape(-1, 3)
+    pixels, valid = _project_points(flat, projection)
+    projected = np.full((flat.shape[0], 2), np.nan)
+    projected[valid] = pixels
+    projected = projected.reshape(corners.shape[0], corners.shape[1], 2)
+    valid = valid.reshape(corners.shape[0], corners.shape[1])
+    edges = [
+        (0, 1), (1, 2), (2, 3), (3, 0),
+        (4, 5), (5, 6), (6, 7), (7, 4),
+        (0, 4), (1, 5), (2, 6), (3, 7),
+    ]
+    for i in range(projected.shape[0]):
+        for edge in edges:
+            if not (valid[i, edge[0]] and valid[i, edge[1]]):
+                continue
+            pts = projected[i, list(edge)]
+            ax.plot(pts[:, 0], pts[:, 1], color=color, linewidth=1.0,
+                    label=label if edge == edges[0] and i == 0 else None)
+
+
+def _save_bev(pred_boxes: np.ndarray, gt_boxes: np.ndarray,
+              fov: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]],
+              output_dir: str, show_gt: bool, show: bool) -> str:
+    output_path = os.path.join(output_dir, 'bev_xy.png')
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.set_title('BEV (XY) Visualization')
+    ax.set_xlabel('x (m)')
+    ax.set_ylabel('y (m)')
+    ax.set_xlim(fov[0])
+    ax.set_ylim(fov[1])
+    ax.set_aspect('equal', adjustable='box')
+
+    if show_gt:
+        _draw_boxes(ax, gt_boxes, color='green', label='Ground Truth')
+    _draw_boxes(ax, pred_boxes, color='red', label='Predictions')
+    if (show_gt and gt_boxes.size > 0) or pred_boxes.size > 0:
+        ax.legend(loc='upper right')
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=200)
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+    return output_path
+
+
+def _save_xz(pred_boxes: np.ndarray, gt_boxes: np.ndarray,
+             fov: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]],
+             output_dir: str, show_gt: bool) -> str:
+    output_path = os.path.join(output_dir, 'xz_view.png')
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.set_title('XZ Visualization')
+    ax.set_xlabel('x (m)')
+    ax.set_ylabel('z (m)')
+    ax.set_xlim(fov[0])
+    ax.set_ylim(fov[2])
+    ax.set_aspect('auto')
+
+    if show_gt:
+        _draw_boxes_xz(ax, gt_boxes, color='green', label='Ground Truth')
+    _draw_boxes_xz(ax, pred_boxes, color='red', label='Predictions')
+    if (show_gt and gt_boxes.size > 0) or pred_boxes.size > 0:
+        ax.legend(loc='upper right')
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=200)
+    plt.close(fig)
+    return output_path
+
+
+def _save_camera_overlay(sample: dict, pred_boxes: np.ndarray, gt_boxes: np.ndarray,
+                         output_dir: str, show_gt: bool) -> Optional[str]:
+    if 'camera_mono' not in sample:
+        return None
+    projection = sample.get('label_to_camera_mono_p')
+    if projection is None:
+        return None
+    projection = projection.detach().cpu().numpy() if torch.is_tensor(projection) else projection
+    img = sample['camera_mono'].detach().cpu().numpy()
+    if img.dtype != np.uint8:
+        img = np.clip(img, 0, 255).astype(np.uint8)
+    output_path = os.path.join(output_dir, 'camera_mono_overlay.png')
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.imshow(img)
+    ax.set_title('Camera Mono Overlay')
+    ax.axis('off')
+
+    if show_gt:
+        _draw_projected_boxes(ax, gt_boxes, projection, color='green', label='Ground Truth')
+    _draw_projected_boxes(ax, pred_boxes, projection, color='red', label='Predictions')
+    if (show_gt and gt_boxes.size > 0) or pred_boxes.size > 0:
+        ax.legend(loc='upper right')
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=200)
+    plt.close(fig)
+    return output_path
+
+
+def _save_radar_bev(sample: dict, pred_boxes: np.ndarray, gt_boxes: np.ndarray,
+                    output_dir: str, show_gt: bool) -> Optional[str]:
+    if 'radar_bev' not in sample:
+        return None
+    radar = sample['radar_bev'].detach().cpu().numpy()
+    if radar.ndim == 3:
+        radar = radar[:, :, 0]
+    radar = np.clip(radar, 1e-6, None)
+    output_path = os.path.join(output_dir, 'radar_bev_overlay.png')
+    fig, ax = plt.subplots(figsize=(10, 4))
+    visu_2d_radar_grid(
+        ax=ax,
+        grid=radar,
+        raster=[np.array(radar_info.range_raster), np.array(radar_info.azimuth_raster)],
+        cart=True,
+        dims='ra',
+        r_max=max(radar_info.range_raster),
+        cm='viridis',
+        flip=False
+    )
+    if show_gt:
+        _draw_boxes(ax, gt_boxes, color='green', label='Ground Truth')
+    _draw_boxes(ax, pred_boxes, color='red', label='Predictions')
+    if (show_gt and gt_boxes.size > 0) or pred_boxes.size > 0:
+        ax.legend(loc='upper right')
+    ax.set_title('Radar BEV Overlay')
+    ax.set_xlabel('x (m)')
+    ax.set_ylabel('y (m)')
+    ax.set_aspect('equal', adjustable='box')
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=200)
+    plt.close(fig)
+    return output_path
+
+
 def visualize_sample(
     model: torch.nn.Module,
     sample: dict,
+    raw_sample: dict,
     label: dict,
     conf_thr: float,
     use_softmax: bool,
-    output_path: str,
+    output_dir: str,
     show_gt: bool,
     show: bool,
     fov: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]],
@@ -133,33 +366,30 @@ def visualize_sample(
     pred_boxes = _decode_predictions(output, conf_thr, use_softmax, fov)
     gt_boxes = _decode_ground_truth(label) if show_gt else np.empty((0, 8), dtype=np.float32)
 
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.set_title('BEV Visualization (Prediction vs GT)')
-    ax.set_xlabel('x (m)')
-    ax.set_ylabel('y (m)')
-    ax.set_xlim(fov[0])
-    ax.set_ylim(fov[1])
-    ax.set_aspect('equal', adjustable='box')
+    os.makedirs(output_dir, exist_ok=True)
 
-    if show_gt:
-        _draw_boxes(ax, gt_boxes, color='green', label='Ground Truth')
-    _draw_boxes(ax, pred_boxes, color='red', label='Predictions')
+    outputs = []
+    outputs.append(_save_bev(pred_boxes, gt_boxes, fov, output_dir, show_gt, show))
+    outputs.append(_save_xz(pred_boxes, gt_boxes, fov, output_dir, show_gt))
 
-    if (show_gt and gt_boxes.size > 0) or pred_boxes.size > 0:
-        ax.legend(loc='upper right')
+    camera_path = _save_camera_overlay(raw_sample, pred_boxes, gt_boxes, output_dir, show_gt)
+    if camera_path:
+        outputs.append(camera_path)
+    else:
+        print("⚠️ 未检测到 camera_mono 或标定信息，跳过原图叠加输出")
 
-    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
-    fig.tight_layout()
-    fig.savefig(output_path, dpi=200)
-    print(f"✅ 已保存可视化结果: {output_path}")
+    radar_path = _save_radar_bev(raw_sample, pred_boxes, gt_boxes, output_dir, show_gt)
+    if radar_path:
+        outputs.append(radar_path)
+    else:
+        print("⚠️ 未检测到 radar_bev，跳过雷达投影输出")
+
+    print("✅ 已保存可视化结果:")
+    for path in outputs:
+        print(f"  - {path}")
     print(f"预测框数量: {len(pred_boxes)}")
     if show_gt:
         print(f"真实框数量: {len(gt_boxes)}")
-
-    if show:
-        plt.show()
-    else:
-        plt.close(fig)
 
 
 def _get_fov(args, config) -> Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]:
@@ -179,13 +409,15 @@ def main() -> None:
     parser.add_argument('--checkpoint', type=str, required=True,
                         help='Path to model checkpoint (.pt).')
     parser.add_argument('--split', type=str, default='test',
-                        help='Dataset split to use (train/test).')
+                        help='Dataset split to use (train/val/test).')
     parser.add_argument('--index', type=int, default=0,
                         help='Sample index in the split.')
     parser.add_argument('--conf', type=float, default=0.5,
                         help='Confidence threshold for predictions.')
     parser.add_argument('--output', type=str, default=None,
-                        help='Output PNG file path.')
+                        help='Output root directory (or legacy PNG path).')
+    parser.add_argument('--output-dir', type=str, default=None,
+                        help='Output root directory for per-sample folders.')
     parser.add_argument('--device', type=str, default=None,
                         help='Override device (e.g. cpu, cuda:0).')
     parser.add_argument('--no-gt', action='store_true',
@@ -210,23 +442,33 @@ def main() -> None:
         raise IndexError(f"Index {args.index} is out of range (0-{len(dataset) - 1}).")
 
     sample, label = dataset[args.index]
+    sample_path = _get_sample_path(dataset, args.index)
+    sample_dir = _resolve_sample_dir(sample_path)
+    output_dir = _build_output_dir(args, sample_dir, args.split, args.index)
+
+    os.makedirs(output_dir, exist_ok=True)
+    print(f"📌 当前使用 split: {args.split}, index: {args.index}")
+    if sample_dir:
+        print(f"📂 样本目录: {sample_dir}")
+    camera_path = sample_path.get('camera_mono')
+    if camera_path:
+        print(f"🖼️ 标注原图: {camera_path}")
+    _write_sample_info(output_dir, args.split, args.index, sample_dir, sample_path)
+
     batch = _to_device(_add_batch_dim(sample), device)
 
     model, _, _ = load_model(args.checkpoint)
     model.to(device)
 
-    output_path = args.output or os.path.join(
-        'visualizations', f"{args.split}_sample_{args.index:06d}.png"
-    )
-
     fov = _get_fov(args, config)
     visualize_sample(
         model=model,
         sample=batch,
+        raw_sample=sample,
         label=label,
         conf_thr=args.conf,
         use_softmax=args.use_softmax,
-        output_path=output_path,
+        output_dir=output_dir,
         show_gt=not args.no_gt,
         show=args.show,
         fov=fov,
