@@ -19,14 +19,30 @@
   - 可扩展的分析功能
   - 支持原始数据加载（如果有）
 
-### 3. **QUICKSTART.md** - 快速入门指南
+### 3. **visualize_checkpoint_sample.py** - 单样本推理可视化脚本
+- **用途**: 使用 `.pt` 模型文件对单个样本进行推理并生成 BEV 可视化图
+- **运行**:
+  ```bash
+  python visualize_checkpoint_sample.py \
+    --src /data/kradar/processed \
+    --cfg /app/config/kradar.json \
+    --checkpoint /app/log/your_model.pt \
+    --index 0 \
+    --output /tmp/sample_000000.png
+  ```
+- **特点**:
+  - 直接读取 checkpoint 推理
+  - 输出 PNG 图像文件
+  - 可选叠加 GT
+
+### 4. **QUICKSTART.md** - 快速入门指南
 - **内容**:
   - 三种可视化方式
   - 快速测试命令
   - 常见问题解决
   - 示例输出展示
 
-### 4. **VISUALIZATION_GUIDE.md** - 详细使用指南
+### 5. **VISUALIZATION_GUIDE.md** - 详细使用指南
 - **内容**:
   - Evaluatelog 文件结构说明
   - 数据格式详解
@@ -95,6 +111,7 @@ D:\DPFT\
 │
 ├── quick_visualize.py              # 快速可视化脚本 ⭐
 ├── visualize_results.py            # 完整可视化工具 ⭐
+├── visualize_checkpoint_sample.py  # 单样本推理可视化脚本 ⭐
 ├── QUICKSTART.md                   # 快速入门指南 📖
 ├── VISUALIZATION_GUIDE.md          # 详细使用指南 📖
 └── README_VISUALIZATION.md         # 本文件
