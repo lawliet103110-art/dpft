@@ -2,12 +2,13 @@
 根据训练得到的 .pt 模型文件，对单个样本进行可视化（BEV 俯视图）。
 
 示例:
-  python visualize_checkpoint_sample.py \
-    --src /data/kradar/processed \
-    --cfg /app/config/kradar.json \
-    --checkpoint /app/log/20240203-232344-241_checkpoint_0122.pt \
+  实际数据示例: /root/autodl-tmp/autodl-tmp/data/kradar/test/1/00182_00150/mono.jpg
+  python /root/autodl-tmp/autodl-tmp/DPFT-main/visualize_checkpoint_sample.py \
+    --src /root/autodl-tmp/autodl-tmp/data/kradar \
+    --cfg /root/autodl-tmp/autodl-tmp/DPFT-main/config/kradar.json \
+    --checkpoint /root/autodl-tmp/autodl-tmp/DPFT-main/result/20251126-235801-585/checkpoints/20251126-235801-585_checkpoint_0199.pt \
     --index 0 \
-    --output /tmp/sample_000000.png
+    --output /root/autodl-tmp/autodl-tmp/DPFT-main/resultjsample_000000.png
 """
 
 import argparse
